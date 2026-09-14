@@ -77,7 +77,7 @@ fn trace_keeps_actionability_check_identifier_but_redacts_occluder_name() {
     assert_eq!(value["checks"][1]["occluder"]["name"]["redacted"], true);
 }
 
-/// The P2-O8 descriptor group rides evidence into trace sinks, and page-authored
+/// The presentation descriptor group rides evidence into trace sinks, and page-authored
 /// tokens must be masked wherever it does — the same rule that masks a
 /// placeholder. `subrole` and `dom_classes` tokenize to fragments this key list
 /// names; `placeholder` and `role_description` (the `description` token) were

@@ -21,12 +21,6 @@ pub enum GetProperty {
     States,
 }
 
-/// An empty string is not text a person reads, so it does not block the
-/// fallback to the other half of the element's identity.
-fn meaningful(value: Option<String>) -> Option<String> {
-    value.filter(|text| !text.trim().is_empty())
-}
-
 pub fn execute(
     args: GetArgs,
     adapter: &dyn PlatformAdapter,
@@ -41,8 +35,8 @@ pub fn execute(
         GetProperty::Title => ("title", json!(entry.identity.name), None),
         GetProperty::Text => {
             let live = optional_live_read(adapter.get_live_value(&handle, deadline))?;
-            let value = meaningful(live.or(entry.identity.value));
-            let name = meaningful(entry.identity.name);
+            let value = crate::accname::non_blank(live.or(entry.identity.value));
+            let name = crate::accname::non_blank(entry.identity.name);
             let readable = if crate::role_text::value_is_the_readable_text(&entry.identity.role) {
                 value.or(name)
             } else {

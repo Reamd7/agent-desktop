@@ -1,4 +1,4 @@
-use super::{parse_finite_f64, set_value_judged_for};
+use super::{SetValuePlan, parse_finite_f64, set_value_judged_for};
 use crate::actions::chain::DeliveryOutcome;
 use agent_desktop_core::{
     Action, ActionStepOutcome, Deadline, DeliveryDisposition, ErrorCode, InteractionPolicy,
@@ -14,9 +14,11 @@ fn set_value_verified_when_readback_equals() {
     let steps = set_value_judged_for(
         deadline(),
         InteractionPolicy::headless(),
-        "hello",
-        true,
-        false,
+        SetValuePlan {
+            value: "hello",
+            value_writable: true,
+            range_available: false,
+        },
         || Ok(DeliveryOutcome::DeliveredVerified),
         || Ok(DeliveryOutcome::NotDelivered),
     )
@@ -39,9 +41,11 @@ fn unequal_readback_stops_without_reaching_range_value() {
     let steps = set_value_judged_for(
         deadline(),
         InteractionPolicy::headless(),
-        "77",
-        true,
-        true,
+        SetValuePlan {
+            value: "77",
+            value_writable: true,
+            range_available: true,
+        },
         || {
             value_calls.set(value_calls.get() + 1);
             Ok(DeliveryOutcome::DeliveredUnverified)
@@ -64,9 +68,11 @@ fn range_value_numeric_on_value_less_control() {
     let steps = set_value_judged_for(
         deadline(),
         InteractionPolicy::headless(),
-        "77",
-        false,
-        true,
+        SetValuePlan {
+            value: "77",
+            value_writable: false,
+            range_available: true,
+        },
         || Ok(DeliveryOutcome::DeliveredVerified),
         || Ok(DeliveryOutcome::DeliveredVerified),
     )
@@ -82,9 +88,11 @@ fn unparsable_range_value_exhausts_honestly() {
     let error = set_value_judged_for(
         deadline(),
         InteractionPolicy::headless(),
-        "not-a-number",
-        false,
-        true,
+        SetValuePlan {
+            value: "not-a-number",
+            value_writable: false,
+            range_available: true,
+        },
         || Ok(DeliveryOutcome::NotDelivered),
         || {
             range_calls.set(range_calls.get() + 1);
@@ -114,9 +122,11 @@ fn error_envelope_carries_value_chars_never_marker_text() {
     let error = set_value_judged_for(
         deadline(),
         InteractionPolicy::headless(),
-        MARKER,
-        false,
-        false,
+        SetValuePlan {
+            value: MARKER,
+            value_writable: false,
+            range_available: false,
+        },
         || Ok(DeliveryOutcome::NotDelivered),
         || Ok(DeliveryOutcome::NotDelivered),
     )

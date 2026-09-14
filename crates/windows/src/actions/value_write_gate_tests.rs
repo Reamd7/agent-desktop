@@ -1,5 +1,5 @@
 use super::imp::gated_value_compare;
-use super::set_value_judged_for;
+use super::{SetValuePlan, set_value_judged_for};
 use crate::actions::chain::DeliveryOutcome;
 use crate::actions::dispatch::execute_action_impl;
 use crate::tree::automation::automation_client;
@@ -51,9 +51,11 @@ fn secure_is_password_skips_get_value_and_reports_unobserved() {
     let steps = set_value_judged_for(
         deadline(),
         InteractionPolicy::headless(),
-        "secret-marker-zz",
-        true,
-        false,
+        SetValuePlan {
+            value: "secret-marker-zz",
+            value_writable: true,
+            range_available: false,
+        },
         || Ok(DeliveryOutcome::from_observation(None)),
         || Ok(DeliveryOutcome::NotDelivered),
     )
@@ -113,23 +115,7 @@ fn inverted_secure_gate_would_call_get_value() {
 
 #[test]
 fn pattern_get_value_lives_only_inside_value_write_gate() {
-    let actions_sources = [
-        ("actions/mutation.rs", include_str!("mutation.rs")),
-        (
-            "actions/scroll_into_view.rs",
-            include_str!("scroll_into_view.rs"),
-        ),
-        ("actions/scroll_ladder.rs", include_str!("scroll_ladder.rs")),
-        ("actions/dispatch.rs", include_str!("dispatch.rs")),
-        ("actions/focus.rs", include_str!("focus.rs")),
-        ("actions/chain.rs", include_str!("chain.rs")),
-        ("actions/value_write.rs", include_str!("value_write.rs")),
-        ("actions/select.rs", include_str!("select.rs")),
-        ("actions/select_search.rs", include_str!("select_search.rs")),
-        ("actions/scroll.rs", include_str!("scroll.rs")),
-        ("actions/toggle_state.rs", include_str!("toggle_state.rs")),
-        ("actions/disclosure.rs", include_str!("disclosure.rs")),
-    ];
+    let actions_sources = crate::actions::mutation::action_scan_sources();
     let get_value = concat!(".", "get_value(");
     for (name, source) in actions_sources {
         for (number, line) in code_lines(source) {

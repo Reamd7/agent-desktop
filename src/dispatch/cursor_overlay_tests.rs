@@ -3,10 +3,9 @@ use crate::cli_args::cursor_overlay::CursorOverlayArgs;
 use crate::cli_args::cursor_overlay_action::CursorOverlayAction;
 use crate::cli_args::cursor_overlay_enable::CursorOverlayEnableArgs;
 use crate::cli_args::cursor_overlay_style::CursorOverlayStyleArgs;
-use crate::dispatch::test_support::{FailingOverlayAdapter, HomeGuard};
+use crate::dispatch::test_support::{FailingOverlayAdapter, HomeGuard, started_overlay_session};
 use crate::test_noop_ops::NoopAdapter;
 use agent_desktop_core::commands::session::{self, SessionAction};
-use agent_desktop_core::session::{ArtifactsMode, SessionTraceMode, StartSessionOptions};
 use agent_desktop_core::{
     ActionOps, AdapterError, InputOps, ObservationOps, SystemOps, context::CommandContext,
 };
@@ -182,17 +181,7 @@ fn an_enable_without_a_label_still_hands_the_renderer_the_greeting() {
 #[test]
 fn disable_reports_uncertain_when_overlay_teardown_fails_after_persisting() {
     let home = HomeGuard::new();
-    let manifest = agent_desktop_core::session::start_session(StartSessionOptions {
-        trace: SessionTraceMode::Off,
-        artifacts: ArtifactsMode::Events,
-        name: None,
-    })
-    .unwrap();
-    agent_desktop_core::session::set_cursor_overlay(
-        &manifest.id,
-        agent_desktop_core::CursorOverlayConfig::enabled(None, 6).unwrap(),
-    )
-    .unwrap();
+    let manifest = started_overlay_session();
     let context = CommandContext::new(Some(manifest.id.clone()), None, false).unwrap();
     let result = dispatch(
         CursorOverlayArgs {
