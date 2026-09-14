@@ -257,3 +257,60 @@ fn actions_never_construct_stale_via_adapter_error_stale_ref() {
         "the stale arm must name ErrorCode::StaleRef directly"
     );
 }
+
+/// `classify_write` itself - the wrapper `chain.rs`, `dispatch.rs`,
+/// `toggle_state.rs` and every other write-path caller actually invokes -
+/// had no direct coverage; every existing test above pins `classify_mutation`
+/// one layer in.
+#[cfg(target_os = "windows")]
+mod classify_write_tests {
+    use crate::actions::mutation::classify_write;
+    use crate::system::hresult::E_ACCESSDENIED;
+    use crate::tree::automation::{ERR_NONE, ERR_NOTFOUND};
+    use agent_desktop_core::{DeliveryDisposition, ErrorCode};
+    use uiautomation::Error as UiaError;
+
+    /// `classify_write`'s second arm (`other if other.is_exhaustion()`) is
+    /// unreachable under the current `is_exhaustion` definition: it is
+    /// exactly `Sentinel(ERR_NONE)`, the value the first arm already
+    /// matches, and a `match` tries arms top-down. This pins the externally
+    /// observable outcome the two arms agree on, since which one produces it
+    /// cannot be distinguished from outside `classify_write`.
+    #[test]
+    fn the_empty_pattern_sentinel_is_absence_not_an_error() {
+        let error = UiaError::new(ERR_NONE, "get_pattern returned nothing");
+
+        let result = classify_write("get_pattern", "UIScrollItemPattern", &error)
+            .expect("an empty pattern must not be Err");
+
+        assert!(!result);
+    }
+
+    #[test]
+    fn a_non_exhaustion_sentinel_is_delegated_to_the_mutation_table() {
+        let error = UiaError::new(ERR_NOTFOUND, "test");
+
+        let outcome = classify_write("Invoke", "InvokePattern.Invoke", &error)
+            .expect_err("a not-found sentinel is not absence and must surface");
+
+        assert_eq!(outcome.code, ErrorCode::ActionFailed);
+        assert_eq!(
+            outcome.disposition.delivery(),
+            DeliveryDisposition::DeliveryUncertain
+        );
+    }
+
+    #[test]
+    fn an_hresult_failure_is_delegated_to_the_mutation_table() {
+        let error = UiaError::from(windows::core::HRESULT(E_ACCESSDENIED));
+
+        let outcome = classify_write("SetValue", "ValuePattern.SetValue", &error)
+            .expect_err("access denied must surface");
+
+        assert_eq!(outcome.code, ErrorCode::PermDenied);
+        assert_eq!(
+            outcome.disposition.delivery(),
+            DeliveryDisposition::NotDelivered
+        );
+    }
+}

@@ -201,7 +201,7 @@ mod imp {
                     TOGGLE_LABEL,
                     DeliveryOutcome::from_delivery(true, verified),
                 ));
-                if verified {
+                if verified || !observed_a_change(before, read_state()) {
                     return Ok(steps);
                 }
             }
@@ -301,6 +301,22 @@ mod imp {
             }
             sleep_poll(deadline)?;
         }
+    }
+
+    /// Whether the control demonstrably moved, which is what licenses a
+    /// second toggle.
+    ///
+    /// A tri-state control needs two toggles to reach checked from
+    /// indeterminate, and after the first one the state has visibly changed -
+    /// the delivery is proven, and the second toggle continues toward the
+    /// target. A state that reads the same as it did before is the opposite
+    /// case: either the toggle did not land, or it landed and this provider
+    /// is not reporting it. Toggling again on that ambiguity is the one move
+    /// that can end with the control back where it started while the step
+    /// reports delivery, so the unverified delivery is returned instead and
+    /// the caller re-reads.
+    fn observed_a_change(before: Option<ToggleKind>, after: Option<ToggleKind>) -> bool {
+        before.is_some() && after.is_some() && before != after
     }
 
     fn poll_checked(

@@ -182,6 +182,22 @@ fn matching_processes(image: &str) -> Result<Vec<ProcessRow>, AdapterError> {
         .collect())
 }
 
+/// Refuses a relative working directory before it reaches `CreateProcessW`.
+///
+/// The child's current directory sits early in the default DLL search order,
+/// so it picks which copy of a dependency loads; a relative path resolves
+/// against whatever directory this process happens to hold, not the caller's.
+#[cfg(target_os = "windows")]
+fn absolute_cwd(cwd: &Path) -> Result<&Path, AdapterError> {
+    if cwd.is_absolute() {
+        return Ok(cwd);
+    }
+    Err(before_launch(AdapterError::new(
+        ErrorCode::InvalidArgs,
+        "The launch working directory must be an absolute path",
+    )))
+}
+
 #[cfg(target_os = "windows")]
 fn create_process(
     executable: &Path,
@@ -198,7 +214,7 @@ fn create_process(
     let command_line = command_line_for(executable, &options.args).map_err(before_launch)?;
     let mut command_wide = to_wide_str(&command_line).map_err(before_launch)?;
     let cwd_wide = match &options.cwd {
-        Some(cwd) => Some(to_wide(cwd).map_err(before_launch)?),
+        Some(cwd) => Some(to_wide(absolute_cwd(cwd)?).map_err(before_launch)?),
         None => None,
     };
     let env_block = child_environment_block(
