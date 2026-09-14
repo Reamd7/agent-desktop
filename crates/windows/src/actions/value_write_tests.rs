@@ -1,18 +1,15 @@
 use super::{SetValuePlan, parse_finite_f64, set_value_judged_for};
 use crate::actions::chain::DeliveryOutcome;
+use crate::system::test_time::deadline;
 use agent_desktop_core::{
-    Action, ActionStepOutcome, Deadline, DeliveryDisposition, ErrorCode, InteractionPolicy,
+    Action, ActionStepOutcome, DeliveryDisposition, ErrorCode, InteractionPolicy,
 };
 use std::cell::Cell;
-
-fn deadline() -> Deadline {
-    Deadline::after(5_000).expect("deadline")
-}
 
 #[test]
 fn set_value_verified_when_readback_equals() {
     let steps = set_value_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
         SetValuePlan {
             value: "hello",
@@ -39,7 +36,7 @@ fn unequal_readback_stops_without_reaching_range_value() {
     let value_calls = Cell::new(0u8);
     let range_calls = Cell::new(0u8);
     let steps = set_value_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
         SetValuePlan {
             value: "77",
@@ -66,7 +63,7 @@ fn unequal_readback_stops_without_reaching_range_value() {
 #[test]
 fn range_value_numeric_on_value_less_control() {
     let steps = set_value_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
         SetValuePlan {
             value: "77",
@@ -86,7 +83,7 @@ fn range_value_numeric_on_value_less_control() {
 fn unparsable_range_value_exhausts_honestly() {
     let range_calls = Cell::new(0u8);
     let error = set_value_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
         SetValuePlan {
             value: "not-a-number",
@@ -120,7 +117,7 @@ fn parse_finite_rejects_nan_and_non_numeric() {
 fn error_envelope_carries_value_chars_never_marker_text() {
     const MARKER: &str = "zzsetvaluemarkerzz";
     let error = set_value_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
         SetValuePlan {
             value: MARKER,

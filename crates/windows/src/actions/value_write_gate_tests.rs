@@ -2,24 +2,21 @@ use super::imp::gated_value_compare;
 use super::{SetValuePlan, set_value_judged_for};
 use crate::actions::chain::DeliveryOutcome;
 use crate::actions::dispatch::execute_action_impl;
+use crate::system::test_time::deadline;
 use crate::tree::automation::automation_client;
 use crate::tree::element::UIAElement;
 use crate::tree::fixture::{CONTENT_MARKER, LocalFixture, ensure_test_apartment};
 use crate::tree::fixture_window;
 use crate::tree::property_outcome::{PropertyOutcome, PropertyValue};
 use agent_desktop_core::{
-    Action, ActionRequest, ActionStepOutcome, AdapterError, Deadline, DeliveryDisposition,
-    InteractionLease, InteractionPolicy, NativeHandle,
+    Action, ActionRequest, ActionStepOutcome, AdapterError, DeliveryDisposition, InteractionLease,
+    InteractionPolicy, NativeHandle,
 };
 use std::cell::Cell;
 use uiautomation::types::Handle;
 
-fn deadline() -> Deadline {
-    Deadline::after(5_000).expect("deadline")
-}
-
 fn lease() -> InteractionLease {
-    InteractionLease::guarded(deadline(), ()).expect("lease")
+    InteractionLease::guarded(deadline(5_000), ()).expect("lease")
 }
 
 fn known_flag(value: bool) -> PropertyOutcome {
@@ -49,7 +46,7 @@ fn secure_is_password_skips_get_value_and_reports_unobserved() {
     assert_eq!(reads.get(), 0);
 
     let steps = set_value_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
         SetValuePlan {
             value: "secret-marker-zz",

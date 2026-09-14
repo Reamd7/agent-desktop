@@ -1,5 +1,6 @@
 use super::{ClickAvailability, click_chain_judged_for, execute_action_impl};
 use crate::actions::chain::DeliveryOutcome;
+use crate::system::test_time::deadline;
 use crate::tree::automation::automation_client;
 use crate::tree::element::UIAElement;
 use crate::tree::fixture::{LocalFixture, ensure_test_apartment};
@@ -13,10 +14,6 @@ use uiautomation::types::Handle;
 
 fn lease() -> InteractionLease {
     InteractionLease::guarded(Deadline::after(5_000).expect("deadline"), ()).expect("lease")
-}
-
-fn short_deadline() -> Deadline {
-    Deadline::after(5_000).expect("deadline")
 }
 
 fn dummy_key() -> KeyCombo {
@@ -229,7 +226,7 @@ fn set_focus_call_site_lives_only_in_focus_rs() {
 #[test]
 fn no_affordance_click_chain_exhausts_not_delivered() {
     let error = click_chain_judged_for(
-        short_deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
         ClickAvailability {
             invoke_available: false,
