@@ -3,7 +3,7 @@ use agent_desktop_core::NodeDescriptor;
 use super::properties::ElementProperties;
 use super::property_ids::TreeProperty;
 
-/// Produces the P2-O8 descriptor group from the read set.
+/// Produces the descriptor group from the read set.
 ///
 /// Every slot is a positive claim: a failed or gated source read contributes
 /// nothing, per the tri-state rule (`emit-state-on-a-positive-claim-never-on-a-default`).
@@ -53,10 +53,7 @@ pub fn placeholder_of(properties: &ElementProperties) -> Option<String> {
 }
 
 fn non_empty_text(outcome: super::property_outcome::PropertyOutcome) -> Option<String> {
-    match outcome.text() {
-        agent_desktop_core::LocatorField::Known(value) if !value.trim().is_empty() => Some(value),
-        _ => None,
-    }
+    outcome.non_blank_text()
 }
 
 #[cfg(test)]

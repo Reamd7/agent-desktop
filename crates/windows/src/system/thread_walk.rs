@@ -1,3 +1,4 @@
+use super::hresult::win32_last_error;
 use agent_desktop_core::{AdapterError, Deadline};
 
 use super::permissions::ensure_budget;
@@ -67,29 +68,13 @@ pub(crate) fn walk_gui_threads<T>(
     Ok(found)
 }
 
+/// Win32 `GetLastError` -> `HRESULT_FROM_WIN32` into the shared HRESULT
+/// table, the convention every native-failure module in this crate uses for
+/// its own local errors.
 fn open_failure_error() -> AdapterError {
     super::listing_retry::narrow_to_permitted_codes(win32_last_error(
         "CreateToolhelp32Snapshot failed for classic menu-mode detection",
     ))
-}
-
-/// Win32 `GetLastError` -> `HRESULT_FROM_WIN32` into the shared HRESULT
-/// table, the convention every native-failure module in this crate uses for
-/// its own local errors.
-fn win32_last_error(message: &str) -> AdapterError {
-    let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-    adapter_error_from_win32(error, message)
-}
-
-fn adapter_error_from_win32(error: u32, message: &str) -> AdapterError {
-    let hresult = super::process_state::hresult_from_win32(error);
-    let record = super::hresult::hresult_record(hresult);
-    let mut err = AdapterError::new(record.code, message)
-        .with_platform_detail(super::hresult::com_hresult_detail(hresult));
-    if let Some(suggestion) = record.suggestion {
-        err = err.with_suggestion(suggestion);
-    }
-    err
 }
 
 /// Counts snapshot handle opens so a test can prove every `ToolHelp`
@@ -104,15 +89,11 @@ pub(crate) mod thread_snapshot_calls {
     }
 
     pub(crate) fn record() {
-        COUNT.with(|cell| cell.set(cell.get() + 1));
+        crate::system::call_counter::record(&COUNT);
     }
 
     pub(crate) fn take() -> usize {
-        COUNT.with(|cell| {
-            let value = cell.get();
-            cell.set(0);
-            value
-        })
+        crate::system::call_counter::take(&COUNT)
     }
 }
 
@@ -129,15 +110,11 @@ pub(crate) mod thread_snapshot_closes {
     }
 
     pub(crate) fn record() {
-        COUNT.with(|cell| cell.set(cell.get() + 1));
+        crate::system::call_counter::record(&COUNT);
     }
 
     pub(crate) fn take() -> usize {
-        COUNT.with(|cell| {
-            let value = cell.get();
-            cell.set(0);
-            value
-        })
+        crate::system::call_counter::take(&COUNT)
     }
 }
 
@@ -159,15 +136,7 @@ pub(super) mod force_open_failure {
     }
 
     pub(crate) fn with<R>(run: impl FnOnce() -> R) -> R {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                ACTIVE.with(|cell| cell.set(false));
-            }
-        }
-        ACTIVE.with(|cell| cell.set(true));
-        let _reset = Reset;
-        run()
+        crate::system::test_support::with_flag(&ACTIVE, true, run)
     }
 }
 

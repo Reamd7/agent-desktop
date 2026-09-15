@@ -1,13 +1,6 @@
 use super::{DROPFILES_SIZE, decode_hdrop, encode_hdrop};
+use crate::input::clipboard_bytes::utf16_le;
 use agent_desktop_core::ErrorCode;
-
-fn utf16_le(units: &[u16]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(units.len() * 2);
-    for unit in units {
-        bytes.extend_from_slice(&unit.to_le_bytes());
-    }
-    bytes
-}
 
 fn path_units(path: &str) -> Vec<u16> {
     path.encode_utf16().collect()
@@ -114,4 +107,30 @@ fn ansi_hdrop_is_rejected() {
 fn embedded_nul_path_encode_is_rejected() {
     let error = encode_hdrop(&["C:\\a\0b.txt".to_string()]).expect_err("embedded NUL");
     assert_eq!(error.code, ErrorCode::InvalidArgs);
+}
+
+#[test]
+fn a_path_list_over_the_total_text_budget_is_rejected_on_read() {
+    let per_path = 16_000;
+    let path_count = 100;
+    let mut units = Vec::new();
+    for _ in 0..path_count {
+        units.extend(std::iter::repeat_n(u16::from(b'a'), per_path));
+        units.push(0);
+    }
+    units.push(0);
+
+    let mut payload = vec![0u8; DROPFILES_SIZE];
+    payload[0..4].copy_from_slice(&(DROPFILES_SIZE as u32).to_le_bytes());
+    payload[16..20].copy_from_slice(&1i32.to_le_bytes());
+    payload.extend(utf16_le(&units));
+
+    let error = decode_hdrop(&payload).expect_err("aggregate text budget");
+    assert_eq!(error.code, ErrorCode::ActionFailed);
+    assert!(
+        error.message.contains("total text budget"),
+        "every per-path and entry-count bound is respected here, so only the \
+         aggregate budget can reject this payload: {}",
+        error.message
+    );
 }

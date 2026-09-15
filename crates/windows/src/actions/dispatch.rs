@@ -9,18 +9,26 @@
 //! click legs route through `physical_keyboard` and `physical_click`.
 
 use agent_desktop_core::{
-    Action, ActionResult, ActionStep, AdapterError, Deadline, Direction, ErrorCode,
-    InteractionLease, InteractionPolicy, NativeHandle, action_request::ActionRequest,
+    Action, ActionResult, ActionStep, AdapterError, Deadline, ErrorCode, InteractionLease,
+    InteractionPolicy, NativeHandle, action_request::ActionRequest,
 };
+
+/// Availability flags for the Click chain's two rungs, bundled so
+/// `click_chain_judged_for` stays within the 5-parameter cap.
+pub(crate) struct ClickAvailability {
+    pub(crate) invoke_available: bool,
+    pub(crate) legacy_available: bool,
+}
 
 #[cfg(target_os = "windows")]
 mod imp {
     use super::{
-        Action, ActionRequest, ActionResult, ActionStep, AdapterError, Deadline, Direction,
+        Action, ActionRequest, ActionResult, ActionStep, AdapterError, ClickAvailability, Deadline,
         ErrorCode, InteractionLease, InteractionPolicy, NativeHandle,
     };
     use crate::actions::chain::{
-        CLICK_CHAIN, ChainRung, DeliveryOutcome, INVOKE_LABEL, build_step, execute_chain,
+        CLICK_CHAIN, ChainRung, DeliveryOutcome, INVOKE_LABEL, build_step, execute_chain, gated,
+        invoke_available, invoke_pattern_delivered,
     };
     use crate::actions::disclosure::{collapse_steps, expand_steps};
     use crate::actions::focus::focus_element;
@@ -42,7 +50,7 @@ mod imp {
     use crate::tree::properties::read_one;
     use crate::tree::property_ids::TreeProperty;
     use agent_desktop_core::LocatorField;
-    use uiautomation::patterns::{UIInvokePattern, UILegacyIAccessiblePattern};
+    use uiautomation::patterns::UILegacyIAccessiblePattern;
 
     const LEGACY_LABEL: &str = "LegacyIAccessible.DoDefaultAction";
 
@@ -100,109 +108,43 @@ mod imp {
             Action::KeyDown(_) | Action::KeyUp(_) | Action::Hover | Action::Drag(_) => {
                 adapter_level_rejection(request.action.name())
             }
-            Action::SetValue(value) => execute_set_value(element, value, request.policy, deadline),
-            Action::Clear => execute_clear(element, request.policy, deadline),
-            Action::Toggle => execute_toggle(element, request.policy, deadline),
-            Action::Check => execute_check(element, request.policy, deadline),
-            Action::Uncheck => execute_uncheck(element, request.policy, deadline),
-            Action::Expand => execute_expand(element, request.policy, deadline),
-            Action::Collapse => execute_collapse(element, request.policy, deadline),
-            Action::Select(value) => execute_select(element, value, deadline),
+            Action::SetValue(value) => {
+                let steps = set_value_steps(element, value, request.policy, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
+            }
+            Action::Clear => {
+                let steps = clear_steps(element, request.policy, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
+            }
+            Action::Toggle => {
+                let steps = toggle_steps(element, request.policy, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
+            }
+            Action::Check => {
+                let steps = check_steps(element, request.policy, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
+            }
+            Action::Uncheck => {
+                let steps = uncheck_steps(element, request.policy, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
+            }
+            Action::Expand => {
+                let steps = expand_steps(element, request.policy, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
+            }
+            Action::Collapse => {
+                let steps = collapse_steps(element, request.policy, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
+            }
+            Action::Select(value) => {
+                let steps = select_steps(element, value, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
+            }
             Action::Scroll(direction, amount) => {
-                execute_scroll(element, direction, *amount, request.policy, deadline)
+                let steps = scroll_steps(element, direction, *amount, deadline)?;
+                Ok(ActionResult::from_execution(&request.action, steps))
             }
         }
-    }
-
-    fn execute_select(
-        element: &UIAElement,
-        value: &str,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let steps = select_steps(element, value, deadline)?;
-        Ok(ActionResult::from_execution(
-            &Action::Select(value.to_string()),
-            steps,
-        ))
-    }
-
-    fn execute_scroll(
-        element: &UIAElement,
-        direction: &Direction,
-        amount: u32,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let steps = scroll_steps(element, direction, amount, policy, deadline)?;
-        Ok(ActionResult::from_execution(
-            &Action::Scroll(direction.clone(), amount),
-            steps,
-        ))
-    }
-
-    fn execute_set_value(
-        element: &UIAElement,
-        value: &str,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let action = Action::SetValue(value.to_string());
-        let steps = set_value_steps(element, value, policy, deadline)?;
-        Ok(ActionResult::from_execution(&action, steps))
-    }
-
-    fn execute_clear(
-        element: &UIAElement,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let steps = clear_steps(element, policy, deadline)?;
-        Ok(ActionResult::from_execution(&Action::Clear, steps))
-    }
-
-    fn execute_toggle(
-        element: &UIAElement,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let steps = toggle_steps(element, policy, deadline)?;
-        Ok(ActionResult::from_execution(&Action::Toggle, steps))
-    }
-
-    fn execute_check(
-        element: &UIAElement,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let steps = check_steps(element, policy, deadline)?;
-        Ok(ActionResult::from_execution(&Action::Check, steps))
-    }
-
-    fn execute_uncheck(
-        element: &UIAElement,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let steps = uncheck_steps(element, policy, deadline)?;
-        Ok(ActionResult::from_execution(&Action::Uncheck, steps))
-    }
-
-    fn execute_expand(
-        element: &UIAElement,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let steps = expand_steps(element, policy, deadline)?;
-        Ok(ActionResult::from_execution(&Action::Expand, steps))
-    }
-
-    fn execute_collapse(
-        element: &UIAElement,
-        policy: InteractionPolicy,
-        deadline: Deadline,
-    ) -> Result<ActionResult, AdapterError> {
-        let steps = collapse_steps(element, policy, deadline)?;
-        Ok(ActionResult::from_execution(&Action::Collapse, steps))
     }
 
     fn null_handle_action(
@@ -253,21 +195,22 @@ mod imp {
         policy: InteractionPolicy,
         deadline: Deadline,
     ) -> Result<ActionResult, AdapterError> {
-        let invoke_available = click_invoke_available(element);
-        let legacy_available = click_legacy_available(element);
         let steps = click_chain_judged_for(
             deadline,
             policy,
-            invoke_available,
-            legacy_available,
-            || invoke_pattern(element),
+            ClickAvailability {
+                invoke_available: invoke_available(element),
+                legacy_available: click_legacy_available(element),
+            },
+            || {
+                Ok(DeliveryOutcome::from_delivery(
+                    invoke_pattern_delivered(element)?,
+                    false,
+                ))
+            },
             || legacy_default_action(element),
         )?;
         Ok(ActionResult::from_execution(&Action::Click, steps))
-    }
-
-    pub(crate) fn click_invoke_available(element: &UIAElement) -> bool {
-        read_one(element, TreeProperty::InvokeAvailable).flag() == Some(true)
     }
 
     pub(crate) fn click_legacy_available(element: &UIAElement) -> bool {
@@ -281,23 +224,12 @@ mod imp {
     pub(crate) fn click_chain_judged_for(
         deadline: Deadline,
         policy: InteractionPolicy,
-        invoke_available: bool,
-        legacy_available: bool,
+        availability: ClickAvailability,
         mut invoke: impl FnMut() -> Result<DeliveryOutcome, AdapterError>,
         mut legacy: impl FnMut() -> Result<DeliveryOutcome, AdapterError>,
     ) -> Result<Vec<ActionStep>, AdapterError> {
-        let mut invoke_run = || {
-            if !invoke_available {
-                return Ok(DeliveryOutcome::NotDelivered);
-            }
-            invoke()
-        };
-        let mut legacy_run = || {
-            if !legacy_available {
-                return Ok(DeliveryOutcome::NotDelivered);
-            }
-            legacy()
-        };
+        let mut invoke_run = gated(availability.invoke_available, &mut invoke);
+        let mut legacy_run = gated(availability.legacy_available, &mut legacy);
         execute_chain(
             deadline,
             &CLICK_CHAIN,
@@ -315,17 +247,6 @@ mod imp {
                 },
             ],
         )
-    }
-
-    fn invoke_pattern(element: &UIAElement) -> Result<DeliveryOutcome, AdapterError> {
-        let delivered = match element.0.get_pattern::<UIInvokePattern>() {
-            Ok(pattern) => match pattern.invoke() {
-                Ok(()) => classify_success()?,
-                Err(error) => classify_write("Invoke", INVOKE_LABEL, &error)?,
-            },
-            Err(error) => classify_write("get_pattern", INVOKE_LABEL, &error)?,
-        };
-        Ok(DeliveryOutcome::from_delivery(delivered, false))
     }
 
     fn legacy_default_action(element: &UIAElement) -> Result<DeliveryOutcome, AdapterError> {

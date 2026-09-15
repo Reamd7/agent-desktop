@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use super::hresult::win32_last_error;
 use agent_desktop_core::{AdapterError, Deadline, ProcessIdentity, process_state::ProcessState};
 
 use super::permissions::ensure_budget;
@@ -172,17 +174,12 @@ fn probe_timeout_ms(deadline: Deadline) -> u64 {
 
 #[cfg(target_os = "windows")]
 fn top_level_windows_for(pid: agent_desktop_core::ProcessId) -> Result<Vec<isize>, AdapterError> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
-
-    let target = u32::from(pid);
     let mut handles = Vec::new();
     super::window_enum::enumerate_top_level(|window| {
         if handles.len() >= MAX_PROBED_WINDOWS {
             return false;
         }
-        let mut owner: u32 = 0;
-        unsafe { GetWindowThreadProcessId(window.handle, &mut owner) };
-        if owner == target {
+        if super::window_identity::live_window_owner(window.handle) == Some(pid) {
             handles.push(window.handle as isize);
         }
         true
@@ -212,38 +209,6 @@ fn open_process_for_state(
 fn close_handle(handle: windows_sys::Win32::Foundation::HANDLE) {
     unsafe {
         windows_sys::Win32::Foundation::CloseHandle(handle);
-    }
-}
-
-/// Win32 `GetLastError` → `HRESULT_FROM_WIN32` into the shared HRESULT table
-/// (A21-8).
-#[cfg(target_os = "windows")]
-fn win32_last_error(message: &str) -> AdapterError {
-    let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-    adapter_error_from_win32(error, message)
-}
-
-#[cfg(target_os = "windows")]
-fn adapter_error_from_win32(error: u32, message: &str) -> AdapterError {
-    let hresult = hresult_from_win32(error);
-    let record = super::hresult::hresult_record(hresult);
-    let mut err = AdapterError::new(record.code, message)
-        .with_platform_detail(super::hresult::com_hresult_detail(hresult));
-    if let Some(suggestion) = record.suggestion {
-        err = err.with_suggestion(suggestion);
-    }
-    err
-}
-
-/// `HRESULT_FROM_WIN32` — the measured path for Win32 codes into the one
-/// HRESULT table (A21-8).
-pub(crate) fn hresult_from_win32(error: u32) -> i32 {
-    if error == 0 {
-        0
-    } else if (error as i32) < 0 {
-        error as i32
-    } else {
-        ((error & 0xFFFF) | 0x8007_0000) as i32
     }
 }
 

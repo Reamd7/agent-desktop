@@ -8,13 +8,14 @@ use std::path::Path;
 use std::time::Duration;
 
 use super::app_ops::{ProcessRow, process_snapshot};
+#[cfg(target_os = "windows")]
+use super::hresult::win32_last_error;
 use super::launch_path::{
     child_environment_block, image_file_name, resolve_executable, validate_app_identifier,
     validate_launch_options,
 };
 use super::permissions::ensure_budget;
 use super::process_identity;
-use super::process_state::hresult_from_win32;
 use super::window_ops::list_windows_live;
 
 pub(crate) fn launch_app_impl(
@@ -181,6 +182,22 @@ fn matching_processes(image: &str) -> Result<Vec<ProcessRow>, AdapterError> {
         .collect())
 }
 
+/// Refuses a relative working directory before it reaches `CreateProcessW`.
+///
+/// The child's current directory sits early in the default DLL search order,
+/// so it picks which copy of a dependency loads; a relative path resolves
+/// against whatever directory this process happens to hold, not the caller's.
+#[cfg(target_os = "windows")]
+fn absolute_cwd(cwd: &Path) -> Result<&Path, AdapterError> {
+    if cwd.is_absolute() {
+        return Ok(cwd);
+    }
+    Err(before_launch(AdapterError::new(
+        ErrorCode::InvalidArgs,
+        "The launch working directory must be an absolute path",
+    )))
+}
+
 #[cfg(target_os = "windows")]
 fn create_process(
     executable: &Path,
@@ -197,7 +214,7 @@ fn create_process(
     let command_line = command_line_for(executable, &options.args).map_err(before_launch)?;
     let mut command_wide = to_wide_str(&command_line).map_err(before_launch)?;
     let cwd_wide = match &options.cwd {
-        Some(cwd) => Some(to_wide(cwd).map_err(before_launch)?),
+        Some(cwd) => Some(to_wide(absolute_cwd(cwd)?).map_err(before_launch)?),
         None => None,
     };
     let env_block = child_environment_block(
@@ -344,23 +361,6 @@ fn to_wide_str(value: &str) -> Result<Vec<u16>, AdapterError> {
     let mut wide: Vec<u16> = value.encode_utf16().collect();
     wide.push(0);
     Ok(wide)
-}
-
-#[cfg(target_os = "windows")]
-fn win32_last_error(message: &str) -> AdapterError {
-    let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-    adapter_error_from_win32(error, message)
-}
-
-fn adapter_error_from_win32(error: u32, message: &str) -> AdapterError {
-    let hresult = hresult_from_win32(error);
-    let record = super::hresult::hresult_record(hresult);
-    let mut err = AdapterError::new(record.code, message)
-        .with_platform_detail(super::hresult::com_hresult_detail(hresult));
-    if let Some(suggestion) = record.suggestion {
-        err = err.with_suggestion(suggestion);
-    }
-    err
 }
 
 fn already_running_error(pid: ProcessId, matches: &[ProcessRow]) -> AdapterError {

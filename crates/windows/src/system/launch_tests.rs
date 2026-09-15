@@ -103,9 +103,12 @@ fn invalid_identifier_is_not_delivered() {
 
 #[test]
 fn elevation_required_maps_through_hresult_from_win32() {
-    let hresult = hresult_from_win32(740);
+    let hresult = crate::system::hresult::hresult_from_win32(740);
     assert_eq!(hresult, 0x8007_02E4_u32 as i32);
-    let error = adapter_error_from_win32(740, "CreateProcessW failed to start the application");
+    let error = crate::system::hresult::adapter_error_from_win32(
+        740,
+        "CreateProcessW failed to start the application",
+    );
     assert!(
         error
             .platform_detail
@@ -139,9 +142,24 @@ fn environment_merge_folds_case_so_override_replaces_inherited_variable() {
 }
 
 #[cfg(target_os = "windows")]
-fn deadline() -> Deadline {
-    Deadline::after(10_000).expect("deadline")
+#[test]
+fn absolute_cwd_refuses_a_relative_working_directory() {
+    let error = super::absolute_cwd(Path::new(r"relative\dir"))
+        .expect_err("a relative cwd must be refused before CreateProcessW");
+    assert_eq!(error.code, ErrorCode::InvalidArgs);
 }
+
+#[cfg(target_os = "windows")]
+#[test]
+fn absolute_cwd_returns_an_absolute_path_unchanged() {
+    let absolute = Path::new(r"C:\agent-desktop-launch-cwd-probe");
+    let returned =
+        super::absolute_cwd(absolute).expect("an absolute cwd must be accepted unchanged");
+    assert_eq!(returned, absolute);
+}
+
+#[cfg(target_os = "windows")]
+use crate::system::test_time::deadline;
 
 #[cfg(target_os = "windows")]
 fn matching_pids(image: &str) -> Vec<ProcessId> {

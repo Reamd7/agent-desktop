@@ -58,10 +58,7 @@ fn deadline(timeout_ms: u64) -> Deadline {
 }
 
 fn identity_for(pid: ProcessId) -> ProcessIdentity {
-    let token = process_identity::token_for_pid(pid)
-        .expect("token read")
-        .expect("live token");
-    ProcessIdentity::new(pid, token)
+    crate::system::live_identity::live_process_identity(pid)
 }
 
 #[test]
@@ -388,3 +385,6 @@ fn an_evaluation_error_surfaces_as_stale_ref_when_the_target_is_gone_and_unchang
         "an evaluation error raised while the target is gone must surface as StaleRef"
     );
 }
+
+#[path = "wait_expiry_detail_tests.rs"]
+mod expiry_detail_tests;

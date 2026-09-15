@@ -10,6 +10,7 @@ pub(crate) mod observe;
 pub(crate) mod resolve;
 pub(crate) mod resolve_anchor;
 pub(crate) mod resolve_match;
+pub(crate) mod resolve_pacing;
 pub(crate) mod resolve_search;
 pub mod roles;
 pub mod states;
@@ -33,6 +34,9 @@ pub mod walker_source;
 mod walker_fake;
 
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 #[path = "hit_test_scan_tests.rs"]
 mod hit_test_scan_tests;
 
@@ -48,6 +52,8 @@ pub(crate) mod fixture_modal;
 pub(crate) mod fixture_overlay;
 #[cfg(all(test, target_os = "windows"))]
 pub(crate) mod fixture_pattern;
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) mod fixture_spawn;
 #[cfg(all(test, target_os = "windows"))]
 pub(crate) mod fixture_window;
 #[cfg(all(test, target_os = "windows"))]

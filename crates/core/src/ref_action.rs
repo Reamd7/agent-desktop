@@ -1,6 +1,6 @@
 use crate::ref_action_wait_support::{after_scroll, trace_scroll_error};
 use crate::{
-    AdapterError, AppError, DeliverySemantics, ErrorCode,
+    AdapterError, AppError,
     action_request::ActionRequest,
     action_result::ActionResult,
     actionability,
@@ -63,14 +63,7 @@ pub(crate) fn dispatch_resolved(
         .process_instance
         .as_deref()
         .filter(|instance| !instance.is_empty())
-        .ok_or_else(|| {
-            AdapterError::new(
-                ErrorCode::StaleRef,
-                "target process instance is unavailable",
-            )
-            .with_suggestion("Run 'snapshot' to refresh, then retry with the updated ref.")
-            .with_disposition(DeliverySemantics::not_delivered())
-        })?;
+        .ok_or_else(|| AdapterError::stale_ref_because("target process instance is unavailable"))?;
     let expected_process = crate::ProcessIdentity::new(target.entry.process.pid, process_instance);
     let mut handle = target
         .adapter

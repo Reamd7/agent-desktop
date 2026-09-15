@@ -10,7 +10,8 @@ use agent_desktop_core::{AdapterError, Deadline, ErrorCode, ImageBuffer, ImageFo
 
 use super::display::display_at;
 pub(crate) use super::gdi_surface::gdi_balance;
-use super::gdi_surface::{self, GdiDcPair, win32_last_error};
+use super::gdi_surface::{self, GdiDcPair};
+use super::hresult::win32_last_error;
 use super::permissions::ensure_budget;
 use super::png_codec::encode_bgra_to_png;
 
@@ -25,11 +26,6 @@ pub(crate) fn capture_display_at(
     ensure_budget(deadline)?;
     let display = display_at(index, deadline)?;
     capture_display_bounds(display.bounds, display.scale, deadline)
-}
-
-/// Captures the primary display — the cross-platform `FullScreen` mapping.
-pub(crate) fn capture_fullscreen(deadline: Deadline) -> Result<ImageBuffer, AdapterError> {
-    capture_display_at(0, deadline)
 }
 
 pub(super) fn capture_display_bounds(

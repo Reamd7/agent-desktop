@@ -25,25 +25,30 @@ const ENABLE_BUDGET: Duration =
 /// the window to be gone rather than for a frame to land.
 const TEARDOWN_BUDGET: Duration = Duration::from_secs(4);
 
-/// The stale-generation sweep runs here — on an `Enable`, before the reach on
-/// the current name — rather than on the spawn path below. A sweep further
-/// down would miss the case that motivates it: both generations alive at once,
-/// the current one answering, so the reach returns `Delivered` and the spawn
-/// path is never taken while the earlier generation's window is still drawn.
+/// The stale-generation sweep runs here — before the reach on the current
+/// name — rather than on the spawn path below. A sweep further down would miss
+/// the case that motivates it: both generations alive at once, the current one
+/// answering, so the reach returns `Delivered` and the spawn path is never
+/// taken while the earlier generation's window is still drawn.
+///
+/// It runs on `Disable` as well as `Enable`, because `broadcast` reaches the
+/// endpoints `discover` can name and a retired generation's pipe is not one of
+/// them. An operator ending a session means all of it; leaving the earlier
+/// generation's window drawn is the one outcome teardown must not produce.
 pub(crate) fn update(control: &CursorOverlayControl) -> Result<(), AdapterError> {
     control.validate()?;
     let root = state_root()?;
     let budget = budget_for(control);
+
+    if sweeps_retired_generations(control) {
+        retire::sweep(&root, control.session_id());
+    }
 
     if control.is_disable() {
         return broadcast(&root, control, budget);
     }
 
     let name = pipe_name::pipe_name(&root, control.session_id(), control.agent_id());
-
-    if control.is_enable() {
-        retire::sweep(&root, control.session_id());
-    }
 
     match transport::reach(&name, control, budget) {
         ReachOutcome::Delivered => return Ok(()),
@@ -87,6 +92,16 @@ fn broadcast(
     first_error.map_or(Ok(()), Err)
 }
 
+/// Which controls clear retired protocol generations.
+///
+/// Establishing a session and ending one both have to. A control inside a
+/// live session does not, and sweeping on those would reach retired pipes on
+/// every mutating command. Pure, so the choice can be asserted without a
+/// renderer to aim at.
+fn sweeps_retired_generations(control: &CursorOverlayControl) -> bool {
+    control.is_enable() || control.is_disable()
+}
+
 fn budget_for(control: &CursorOverlayControl) -> Duration {
     if control.is_disable() {
         TEARDOWN_BUDGET
@@ -107,6 +122,11 @@ fn budget_for(control: &CursorOverlayControl) -> Duration {
 const MINIMUM_REACH: Duration = Duration::from_millis(16);
 
 const RETRY_INTERVAL: Duration = Duration::from_millis(8);
+/// The retry pause doubles from `RETRY_INTERVAL` up to this ceiling: a
+/// renderer that is merely slow to register its pipe is caught by the first
+/// few polls, and one that is not coming stops being asked sixty times a
+/// second for the rest of the budget.
+const MAXIMUM_RETRY_INTERVAL: Duration = Duration::from_millis(128);
 
 /// Reaches until a renderer answers or the budget is gone, handing each
 /// attempt what is actually left rather than the full budget again.
@@ -123,6 +143,7 @@ fn retry_until_reached(
     deadline: std::time::Instant,
     mut reach: impl FnMut(Duration) -> ReachOutcome,
 ) -> Result<(), AdapterError> {
+    let mut pause = RETRY_INTERVAL;
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         if remaining < MINIMUM_REACH {
@@ -136,7 +157,8 @@ fn retry_until_reached(
             ReachOutcome::Unreachable(error) => return Err(error),
             ReachOutcome::NoRenderer => {}
         }
-        std::thread::sleep(RETRY_INTERVAL);
+        std::thread::sleep(pause.min(remaining));
+        pause = (pause * 2).min(MAXIMUM_RETRY_INTERVAL);
     }
 }
 
@@ -167,10 +189,10 @@ fn start_renderer(
 mod imp {
     use super::{pipe_name, transport};
     use crate::system::cursor_overlay::image_identity;
-    use crate::system::cursor_overlay::wide::wide;
+    use crate::system::cursor_overlay::wide::{wide, win32_error};
     use agent_desktop_core::{AdapterError, CursorOverlayControl};
     use std::time::{Duration, Instant};
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
+    use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DETACHED_PROCESS,
         PROCESS_INFORMATION, STARTUPINFOW,
@@ -248,11 +270,9 @@ mod imp {
             )
         };
         if started == 0 {
-            let code = unsafe { GetLastError() };
-            return Err(
-                AdapterError::internal("The cursor overlay renderer could not be started")
-                    .with_platform_detail(format!("Win32 error {code}")),
-            );
+            return Err(win32_error(
+                "The cursor overlay renderer could not be started",
+            ));
         }
         unsafe {
             CloseHandle(information.hThread);

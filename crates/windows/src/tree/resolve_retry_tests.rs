@@ -2,6 +2,8 @@
 //! retries within budget, and expiry carries the last diagnosis.
 
 use super::*;
+use crate::system::test_time::deadline;
+use crate::tree::test_support::unreachable_handle;
 use agent_desktop_core::DeliverySemantics;
 
 fn retryable_incomplete(message: &str) -> AdapterError {
@@ -23,21 +25,13 @@ fn err_code_owned(result: Result<NativeHandle, AdapterError>) -> AdapterError {
     }
 }
 
-fn short_deadline() -> Deadline {
-    Deadline::after(200).expect("a deadline")
-}
-
-fn generous_deadline() -> Deadline {
-    Deadline::after(5_000).expect("a deadline")
-}
-
 /// An incomplete attempt retries within its deadline and succeeds when the
 /// underlying cause recovers - the tree stabilises after a vanishing
 /// node, the fake recovers.
 #[test]
 fn an_incomplete_attempt_retries_and_succeeds_within_the_deadline() {
     let mut attempts = 0;
-    let deadline = generous_deadline();
+    let deadline = deadline(5_000);
     let result = retry_incomplete_until(deadline, || {
         attempts += 1;
         if attempts < 3 {
@@ -55,7 +49,7 @@ fn an_incomplete_attempt_retries_and_succeeds_within_the_deadline() {
 #[test]
 fn a_settled_non_match_never_retries() {
     let mut attempts = 0;
-    let deadline = generous_deadline();
+    let deadline = deadline(5_000);
     let result = retry_incomplete_until(deadline, || {
         attempts += 1;
         Err(AdapterError::new(
@@ -76,7 +70,7 @@ fn a_settled_non_match_never_retries() {
 #[test]
 fn an_unstamped_unresponsive_error_is_not_retried() {
     let mut attempts = 0;
-    let deadline = generous_deadline();
+    let deadline = deadline(5_000);
     let result = retry_incomplete_until(deadline, || {
         attempts += 1;
         Err(AdapterError::new(
@@ -96,7 +90,7 @@ fn an_unstamped_unresponsive_error_is_not_retried() {
 /// discards the diagnosis.
 #[test]
 fn deadline_expiry_mid_incompleteness_returns_the_last_diagnosis_stamped() {
-    let deadline = short_deadline();
+    let deadline = deadline(200);
     let result = retry_incomplete_until(deadline, || Err(retryable_incomplete("stuck")));
     let error = err_code_owned(result);
     assert_eq!(error.code, agent_desktop_core::ErrorCode::AppUnresponsive);
@@ -114,7 +108,7 @@ fn deadline_expiry_mid_incompleteness_returns_the_last_diagnosis_stamped() {
 /// is nothing more informative to surface.
 #[test]
 fn deadline_expiry_with_no_incomplete_returns_the_timeout() {
-    let deadline = short_deadline();
+    let deadline = deadline(200);
     let result = retry_incomplete_until(deadline, || {
         Err(AdapterError::new(
             agent_desktop_core::ErrorCode::Timeout,
@@ -163,44 +157,11 @@ fn the_deadline_stamp_leaks_no_marker_into_message_or_platform_detail() {
     );
 }
 
-fn unreachable_handle() -> NativeHandle {
-    NativeHandle::new(())
-}
-
 fn entry_with_hash(bounds_hash: Option<u64>) -> RefEntry {
-    RefEntry {
-        process: agent_desktop_core::RefProcess {
-            pid: agent_desktop_core::ProcessId::new(1),
-            process_instance: None,
-        },
-        identity: agent_desktop_core::RefEntryIdentity {
-            role: "button".to_string(),
-            name: None,
-            value: None,
-            description: None,
-            native_id: None,
-        },
-        geometry: agent_desktop_core::RefGeometry {
-            bounds: None,
-            bounds_hash,
-        },
-        capabilities: agent_desktop_core::RefCapabilities {
-            states: Vec::new(),
-            available_actions: Vec::new(),
-        },
-        source: agent_desktop_core::RefSource {
-            source_app: None,
-            source_window_id: None,
-            source_window_title: None,
-            source_window_bounds_hash: None,
-            source_surface: agent_desktop_core::SnapshotSurface::Window,
-        },
-        scope: agent_desktop_core::RefScope {
-            root_ref: None,
-            path_is_absolute: true,
-            path: agent_desktop_core::refs::RefPath::default(),
-        },
-    }
+    let mut entry = crate::tree::walker_fake::ref_entry("button");
+    entry.geometry.bounds_hash = bounds_hash;
+    entry.scope.path_is_absolute = true;
+    entry
 }
 
 /// A sole match found while another region of the tree was unreadable must
@@ -295,8 +256,7 @@ fn a_structurally_unverifiable_entry_settles_stale_in_one_attempt() {
     let source = UiaTreeSource::for_root(&root).expect("a tree source");
     let prepared = source.prepare_root(&root).expect("a prepared root");
     let budget = WalkBudget::new(10, deadline);
-    let mut prefix = Vec::new();
-    let found = find_password(&source, &prepared, 0, &budget, &mut prefix)
+    let found = find_password(&source, &prepared, &budget)
         .expect("the fixture walk succeeds")
         .expect("a secure password element exists");
     let (_, _, evidence, _) = found;
@@ -308,39 +268,13 @@ fn a_structurally_unverifiable_entry_settles_stale_in_one_attempt() {
     .unwrap()
     .expect("a live fixture process has a token");
 
-    let entry = RefEntry {
-        process: agent_desktop_core::RefProcess {
-            pid: agent_desktop_core::ProcessId::from(fixture.process_id()),
-            process_instance: Some(token),
-        },
-        identity: agent_desktop_core::RefEntryIdentity {
-            role,
-            name: None,
-            value: None,
-            description: None,
-            native_id: None,
-        },
-        geometry: agent_desktop_core::RefGeometry {
-            bounds: None,
-            bounds_hash: None,
-        },
-        capabilities: agent_desktop_core::RefCapabilities {
-            states: Vec::new(),
-            available_actions: Vec::new(),
-        },
-        source: agent_desktop_core::RefSource {
-            source_app: Some("fixture.exe".into()),
-            source_window_id: Some(format!("w-{}", fixture.handle())),
-            source_window_title: None,
-            source_window_bounds_hash: None,
-            source_surface: agent_desktop_core::SnapshotSurface::Window,
-        },
-        scope: agent_desktop_core::RefScope {
-            root_ref: None,
-            path_is_absolute: false,
-            path: agent_desktop_core::refs::RefPath::default(),
-        },
+    let mut entry = crate::tree::walker_fake::ref_entry(&role);
+    entry.process = agent_desktop_core::RefProcess {
+        pid: agent_desktop_core::ProcessId::from(fixture.process_id()),
+        process_instance: Some(token),
     };
+    entry.source.source_app = Some("fixture.exe".into());
+    entry.source.source_window_id = Some(format!("w-{}", fixture.handle()));
 
     assert!(
         crate::tree::resolve_search::entry_is_unverifiable(&entry),

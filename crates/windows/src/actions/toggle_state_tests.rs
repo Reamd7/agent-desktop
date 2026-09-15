@@ -1,23 +1,20 @@
-use super::{ToggleKind, check_uncheck_judged_for, toggle_judged_for};
+use super::{
+    CheckUncheckPlan, ToggleAvailability, ToggleKind, check_uncheck_judged_for, toggle_judged_for,
+};
 use crate::actions::chain::DeliveryOutcome;
-use agent_desktop_core::{ActionStepOutcome, Deadline, ErrorCode, InteractionPolicy};
+use crate::system::test_time::deadline;
+use agent_desktop_core::{ActionStepOutcome, ErrorCode, InteractionPolicy};
 use std::cell::Cell;
-
-fn deadline() -> Deadline {
-    Deadline::after(5_000).expect("deadline")
-}
-
-fn zero_deadline() -> Deadline {
-    Deadline::after(0).expect("zero deadline")
-}
 
 #[test]
 fn toggle_change_observed_is_verified() {
     let steps = toggle_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
-        true,
-        false,
+        ToggleAvailability {
+            toggle_ok: true,
+            invoke_ok: false,
+        },
         || Ok(DeliveryOutcome::DeliveredVerified),
         || Ok(DeliveryOutcome::NotDelivered),
     )
@@ -30,10 +27,12 @@ fn toggle_change_observed_is_verified() {
 #[test]
 fn toggle_no_change_is_unverified() {
     let steps = toggle_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
-        true,
-        false,
+        ToggleAvailability {
+            toggle_ok: true,
+            invoke_ok: false,
+        },
         || Ok(DeliveryOutcome::DeliveredUnverified),
         || Ok(DeliveryOutcome::NotDelivered),
     )
@@ -44,10 +43,12 @@ fn toggle_no_change_is_unverified() {
 #[test]
 fn toggle_before_unreadable_is_unverified() {
     let steps = toggle_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
-        true,
-        false,
+        ToggleAvailability {
+            toggle_ok: true,
+            invoke_ok: false,
+        },
         || Ok(DeliveryOutcome::from_delivery(true, false)),
         || Ok(DeliveryOutcome::NotDelivered),
     )
@@ -60,10 +61,12 @@ fn toggle_absent_falls_to_invoke() {
     let toggle = Cell::new(0u8);
     let invoke = Cell::new(0u8);
     let steps = toggle_judged_for(
-        deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
-        false,
-        true,
+        ToggleAvailability {
+            toggle_ok: false,
+            invoke_ok: true,
+        },
         || {
             toggle.set(toggle.get() + 1);
             Ok(DeliveryOutcome::DeliveredVerified)
@@ -85,10 +88,12 @@ fn check_from_off_toggles_once() {
     let toggles = Cell::new(0u8);
     let state = Cell::new(Some(ToggleKind::Off));
     let steps = check_uncheck_judged_for(
-        deadline(),
-        true,
-        true,
-        false,
+        deadline(5_000),
+        CheckUncheckPlan {
+            want_checked: true,
+            toggle_ok: true,
+            invoke_ok: false,
+        },
         || state.get(),
         || {
             toggles.set(toggles.get() + 1);
@@ -108,10 +113,12 @@ fn check_from_indeterminate_toggles_twice() {
     let toggles = Cell::new(0u8);
     let state = Cell::new(Some(ToggleKind::Indeterminate));
     let steps = check_uncheck_judged_for(
-        deadline(),
-        true,
-        true,
-        false,
+        deadline(5_000),
+        CheckUncheckPlan {
+            want_checked: true,
+            toggle_ok: true,
+            invoke_ok: false,
+        },
         || state.get(),
         || {
             let next = match state.get() {
@@ -136,10 +143,12 @@ fn check_already_on_skips_without_invoke() {
     let toggles = Cell::new(0u8);
     let invokes = Cell::new(0u8);
     let steps = check_uncheck_judged_for(
-        deadline(),
-        true,
-        true,
-        true,
+        deadline(5_000),
+        CheckUncheckPlan {
+            want_checked: true,
+            toggle_ok: true,
+            invoke_ok: true,
+        },
         || Some(ToggleKind::On),
         || {
             toggles.set(toggles.get() + 1);
@@ -162,10 +171,12 @@ fn check_already_on_skips_without_invoke() {
 fn uncheck_already_off_skips_without_invoke() {
     let toggles = Cell::new(0u8);
     let steps = check_uncheck_judged_for(
-        deadline(),
-        false,
-        true,
-        true,
+        deadline(5_000),
+        CheckUncheckPlan {
+            want_checked: false,
+            toggle_ok: true,
+            invoke_ok: true,
+        },
         || Some(ToggleKind::Off),
         || {
             toggles.set(toggles.get() + 1);
@@ -182,10 +193,12 @@ fn uncheck_already_off_skips_without_invoke() {
 fn zero_budget_check_times_out_without_sleeping_past_deadline() {
     let toggles = Cell::new(0u8);
     let error = check_uncheck_judged_for(
-        zero_deadline(),
-        true,
-        true,
-        false,
+        deadline(0),
+        CheckUncheckPlan {
+            want_checked: true,
+            toggle_ok: true,
+            invoke_ok: false,
+        },
         || Some(ToggleKind::Off),
         || {
             toggles.set(toggles.get() + 1);
@@ -198,15 +211,22 @@ fn zero_budget_check_times_out_without_sleeping_past_deadline() {
     assert_eq!(toggles.get(), 0);
 }
 
+/// A provider that reports the same state after a delivered toggle is
+/// ambiguous: the toggle may have landed unseen. Firing again on that
+/// ambiguity is the one move that can leave the control back at its starting
+/// state while every step claims delivery, so the run stops at one toggle and
+/// hands the caller an unverified delivery to re-read.
 #[test]
-fn check_does_not_invoke_after_unverified_toggle_delivery() {
+fn check_does_not_refire_a_toggle_the_provider_never_showed_moving() {
     let toggles = Cell::new(0u8);
     let invokes = Cell::new(0u8);
     let steps = check_uncheck_judged_for(
-        deadline(),
-        true,
-        true,
-        true,
+        deadline(5_000),
+        CheckUncheckPlan {
+            want_checked: true,
+            toggle_ok: true,
+            invoke_ok: true,
+        },
         || Some(ToggleKind::Off),
         || {
             toggles.set(toggles.get() + 1);
@@ -218,7 +238,7 @@ fn check_does_not_invoke_after_unverified_toggle_delivery() {
         },
     )
     .expect("delivered unverified");
-    assert_eq!(toggles.get(), 2);
+    assert_eq!(toggles.get(), 1, "a second toggle would undo the first");
     assert_eq!(invokes.get(), 0);
     assert!(steps.iter().all(|step| step.verified() == Some(false)));
 }

@@ -1,12 +1,10 @@
 use super::{SCROLL_LABEL, ScrollPlan, axis_name, scroll_effect_verified, scroll_judged_for};
+use crate::system::test_time::deadline;
 use agent_desktop_core::{
-    ActionStepOutcome, AdapterError, Deadline, DeliveryDisposition, Direction, ErrorCode, Rect,
+    ActionStepOutcome, AdapterError, DeliveryDisposition, DeliverySemantics, Direction, ErrorCode,
+    Rect,
 };
 use std::cell::Cell;
-
-fn deadline() -> Deadline {
-    Deadline::after(5_000).expect("deadline")
-}
 
 fn plan(amount: u32, axis_scrollable: bool) -> ScrollPlan {
     ScrollPlan {
@@ -25,8 +23,13 @@ fn down_times_three_issues_three_vertical_small_increments() {
         Ok(())
     };
     let mut observe = || true;
-    let steps = scroll_judged_for(deadline(), plan(3, true), &mut scroll_once, &mut observe)
-        .expect("scroll");
+    let steps = scroll_judged_for(
+        deadline(5_000),
+        plan(3, true),
+        &mut scroll_once,
+        &mut observe,
+    )
+    .expect("scroll");
     assert_eq!(calls.get(), 3);
     assert_eq!(steps[0].label(), SCROLL_LABEL);
     assert_eq!(steps[0].verified(), Some(true));
@@ -43,7 +46,7 @@ fn unscrollable_axis_is_not_delivered_and_names_the_axis() {
     };
     let mut observe = || false;
     let error = scroll_judged_for(
-        deadline(),
+        deadline(5_000),
         ScrollPlan {
             scroll_available: true,
             axis_scrollable: false,
@@ -107,7 +110,7 @@ fn scroll_unavailable_is_not_delivered() {
     let mut scroll_once = || Ok(());
     let mut observe = || true;
     let error = scroll_judged_for(
-        deadline(),
+        deadline(5_000),
         ScrollPlan {
             scroll_available: false,
             axis_scrollable: true,
@@ -139,11 +142,57 @@ fn mid_scroll_failure_is_delivered_unverified() {
         Ok(())
     };
     let mut observe = || false;
-    let error = scroll_judged_for(deadline(), plan(3, true), &mut scroll_once, &mut observe)
-        .expect_err("partial");
+    let error = scroll_judged_for(
+        deadline(5_000),
+        plan(3, true),
+        &mut scroll_once,
+        &mut observe,
+    )
+    .expect_err("partial");
     assert_eq!(calls.get(), 2);
     assert_eq!(
         error.disposition.delivery(),
         DeliveryDisposition::DeliveredUnverified
+    );
+}
+
+/// A scroll that stops part-way is re-framed as a partial delivery, but the
+/// reason it stopped is what the caller acts on: a deadline is retryable with
+/// a longer budget and a refusing control is not. Stamping both `ACTION_FAILED`
+/// erased that difference.
+#[test]
+fn a_partial_scroll_keeps_the_code_of_whatever_stopped_it() {
+    let attempts = Cell::new(0u32);
+    let error = scroll_judged_for(
+        deadline(5_000),
+        plan(3, true),
+        &mut || {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() == 1 {
+                Ok(())
+            } else {
+                Err(AdapterError::new(ErrorCode::Timeout, "provider went away"))
+            }
+        },
+        &mut || true,
+    )
+    .expect_err("the second step fails");
+
+    assert_eq!(
+        error.code,
+        ErrorCode::Timeout,
+        "the cause survives re-framing"
+    );
+    assert_eq!(
+        error.disposition,
+        DeliverySemantics::delivered_unverified(),
+        "one step landed, so the caller must re-read before retrying"
+    );
+    assert_eq!(
+        error
+            .details
+            .as_ref()
+            .and_then(|d| d.get("completed_steps")),
+        Some(&serde_json::json!(1))
     );
 }

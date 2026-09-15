@@ -4,9 +4,7 @@
 //! SmallIncrement/SmallDecrement on one axis, invokes `amount` times under the
 //! deadline, and verifies by scroll-percent delta or bounds change.
 
-use agent_desktop_core::{
-    ActionStep, AdapterError, Deadline, Direction, ErrorCode, InteractionPolicy, Rect,
-};
+use agent_desktop_core::{ActionStep, AdapterError, Deadline, Direction, ErrorCode, Rect};
 
 use crate::actions::chain::{DeliveryOutcome, build_step};
 use crate::tree::element::UIAElement;
@@ -67,8 +65,8 @@ pub(crate) fn scroll_effect_verified(
 mod imp {
     use super::{
         ActionStep, AdapterError, Deadline, DeliveryOutcome, Direction, ErrorCode,
-        InteractionPolicy, MAX_SCROLL_AMOUNT, SCROLL_LABEL, ScrollPlan, UIAElement, axis_name,
-        build_step, scroll_amounts, scroll_effect_verified,
+        MAX_SCROLL_AMOUNT, SCROLL_LABEL, ScrollPlan, UIAElement, axis_name, build_step,
+        scroll_amounts, scroll_effect_verified,
     };
     use crate::actions::mutation::{classify_success, classify_write};
     use crate::system::permissions::ensure_budget;
@@ -81,7 +79,6 @@ mod imp {
         element: &UIAElement,
         direction: &Direction,
         amount: u32,
-        _policy: InteractionPolicy,
         deadline: Deadline,
     ) -> Result<Vec<ActionStep>, AdapterError> {
         validate_amount(amount)?;
@@ -100,7 +97,7 @@ mod imp {
         let before_percent = pattern
             .as_ref()
             .and_then(|pattern| read_percent(pattern, direction));
-        let before_bounds = read_bounds(element);
+        let before_bounds = known_bounds(element);
         let (horizontal, vertical) = scroll_amounts(direction);
         let mut scroll_once = || {
             let Some(pattern) = pattern.as_ref() else {
@@ -120,7 +117,7 @@ mod imp {
             let after_percent = pattern
                 .as_ref()
                 .and_then(|pattern| read_percent(pattern, direction));
-            let after_bounds = read_bounds(element);
+            let after_bounds = known_bounds(element);
             scroll_effect_verified(before_percent, after_percent, before_bounds, after_bounds)
         };
         scroll_judged_for(
@@ -155,14 +152,14 @@ mod imp {
                 if completed == 0 {
                     error
                 } else {
-                    partial_scroll_error(completed, plan.amount)
+                    partial_scroll_error(error, completed, plan.amount)
                 }
             })?;
             scroll_once().map_err(|error| {
                 if completed == 0 {
                     error
                 } else {
-                    partial_scroll_error(completed, plan.amount)
+                    partial_scroll_error(error, completed, plan.amount)
                 }
             })?;
         }
@@ -189,7 +186,9 @@ mod imp {
         }
     }
 
-    fn read_bounds(element: &UIAElement) -> Option<Rect> {
+    /// The one bounds-or-`None` read shared with `scroll_into_view`'s
+    /// before/after comparison.
+    pub(crate) fn known_bounds(element: &UIAElement) -> Option<Rect> {
         match read_one(element, TreeProperty::BoundingRectangle).bounds() {
             LocatorField::Known(bounds) => Some(bounds),
             _ => None,
@@ -232,11 +231,21 @@ mod imp {
         )
     }
 
-    fn partial_scroll_error(completed: u32, requested: u32) -> AdapterError {
+    /// Re-frames a mid-run failure as a partial scroll without replacing what
+    /// went wrong.
+    ///
+    /// The steps already delivered change the *disposition* - the caller must
+    /// re-read before retrying - but not the cause. Stamping every partial
+    /// scroll `ACTION_FAILED` erased exactly the distinction a caller acts on:
+    /// a budget that ran out is retryable with a longer one, and a control
+    /// that refused the step is not. The original code is kept and its
+    /// message carried in `platform_detail`.
+    fn partial_scroll_error(cause: AdapterError, completed: u32, requested: u32) -> AdapterError {
         AdapterError::new(
-            ErrorCode::ActionFailed,
+            cause.code,
             format!("ScrollPattern.Scroll stopped after {completed} of {requested} requested scroll steps"),
         )
+        .with_platform_detail(cause.message)
         .with_details(serde_json::json!({
             "action_may_have_completed": true,
             "completed_steps": completed,
@@ -249,15 +258,12 @@ mod imp {
 
 #[cfg(not(target_os = "windows"))]
 mod imp {
-    use super::{
-        ActionStep, AdapterError, Deadline, Direction, InteractionPolicy, ScrollPlan, UIAElement,
-    };
+    use super::{ActionStep, AdapterError, Deadline, Direction, ScrollPlan, UIAElement};
 
     pub(crate) fn scroll_steps(
         _element: &UIAElement,
         _direction: &Direction,
         _amount: u32,
-        _policy: InteractionPolicy,
         _deadline: Deadline,
     ) -> Result<Vec<ActionStep>, AdapterError> {
         Err(AdapterError::not_supported("Scroll"))
@@ -274,6 +280,9 @@ mod imp {
 }
 
 pub(crate) use imp::scroll_steps;
+
+#[cfg(target_os = "windows")]
+pub(crate) use imp::known_bounds;
 
 #[cfg(all(test, target_os = "windows"))]
 pub(crate) use imp::scroll_judged_for;

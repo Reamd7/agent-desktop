@@ -4,9 +4,10 @@ use agent_desktop_core::{
 use std::time::Duration;
 
 use super::app_ops::is_protected_process;
+#[cfg(target_os = "windows")]
+use super::hresult::{adapter_error_from_win32, win32_last_error};
 use super::permissions::ensure_budget;
 use super::process_identity;
-use super::process_state::hresult_from_win32;
 
 const EXIT_POLL: Duration = Duration::from_millis(25);
 
@@ -284,14 +285,9 @@ fn process_observed_gone(pid: ProcessId, instance: &str) -> Result<bool, Adapter
 
 #[cfg(target_os = "windows")]
 fn top_level_windows_for_pid(pid: ProcessId) -> Result<Vec<isize>, AdapterError> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
-
-    let target = u32::from(pid);
     let mut handles = Vec::new();
     super::window_enum::enumerate_top_level(|window| {
-        let mut owner: u32 = 0;
-        unsafe { GetWindowThreadProcessId(window.handle, &mut owner) };
-        if owner == target {
+        if super::window_identity::live_window_owner(window.handle) == Some(pid) {
             handles.push(window.handle as isize);
         }
         true
@@ -307,19 +303,16 @@ fn post_wm_close_if_still_owned(
     pid: ProcessId,
     instance: &str,
 ) -> Result<bool, AdapterError> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowThreadProcessId, PostMessageW, WM_CLOSE,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
 
-    let mut owner: u32 = 0;
-    unsafe { GetWindowThreadProcessId(hwnd as *mut core::ffi::c_void, &mut owner) };
-    if owner != u32::from(pid) {
+    let hwnd = hwnd as super::window_enum::WindowHandle;
+    if super::window_identity::live_window_owner(hwnd) != Some(pid) {
         return Ok(false);
     }
     if !process_identity::matches_instance(pid, instance)? {
         return Ok(false);
     }
-    let posted = unsafe { PostMessageW(hwnd as *mut core::ffi::c_void, WM_CLOSE, 0, 0) };
+    let posted = unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
     if posted == 0 {
         return Err(win32_last_error("PostMessageW(WM_CLOSE) failed"));
     }
@@ -357,23 +350,6 @@ fn handle_matches_instance(
         ticks % TICKS_PER_SECOND
     );
     Ok(from_handle == instance)
-}
-
-#[cfg(target_os = "windows")]
-fn win32_last_error(message: &str) -> AdapterError {
-    let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-    adapter_error_from_win32(error, message)
-}
-
-fn adapter_error_from_win32(error: u32, message: &str) -> AdapterError {
-    let hresult = hresult_from_win32(error);
-    let record = super::hresult::hresult_record(hresult);
-    let mut err = AdapterError::new(record.code, message)
-        .with_platform_detail(super::hresult::com_hresult_detail(hresult));
-    if let Some(suggestion) = record.suggestion {
-        err = err.with_suggestion(suggestion);
-    }
-    err
 }
 
 fn before_termination(error: AdapterError) -> AdapterError {

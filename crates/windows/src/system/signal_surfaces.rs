@@ -99,7 +99,7 @@ fn sheet_signal(target: &SurfaceTarget<'_>, handle: WindowHandle) -> SurfaceSign
         app: target.name.to_string(),
         pid: target.pid,
         process_instance: target.instance.to_string(),
-        id: format!("w-{}", handle as usize),
+        id: super::window_ops::window_id(handle),
         title: None,
     }
 }
@@ -140,7 +140,7 @@ fn sheet_surfaces(
             continue;
         };
         match root_from_hwnd(handle as isize, deadline) {
-            Ok(root) if window_is_modal_sheet(&root, false) => {
+            Ok(root) if window_is_modal_sheet(&root) => {
                 surfaces.push(sheet_signal(target, handle));
             }
             Ok(_) => {}

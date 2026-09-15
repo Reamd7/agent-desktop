@@ -26,7 +26,7 @@ fn a_malformed_window_id_is_rejected_before_the_platform_is_reached() {
 fn an_absent_window_modal_read_is_not_a_sheet() {
     use super::super::element::{CannedElement, UIAElement};
     let element = UIAElement::from(CannedElement);
-    assert!(!window_is_modal_sheet(&element, true));
+    assert!(!window_is_modal_sheet(&element));
 }
 
 /// The shipped predicate, on the lane that runs it.
@@ -53,11 +53,7 @@ fn a_live_non_modal_window_is_not_classified_as_a_sheet() {
         Some(false),
         "the provider must answer this read for the classification below to be tested"
     );
-    assert!(!window_is_modal_sheet(&root, false));
-    assert!(
-        !window_is_modal_sheet(&root, true),
-        "the chromium flag is not consulted by this classification"
-    );
+    assert!(!window_is_modal_sheet(&root));
 }
 
 #[cfg(all(test, target_os = "windows"))]
@@ -75,9 +71,9 @@ mod shell_surfaces {
         SHELL_SURFACE_LOCK, or_skip_shell, shell_declined_the_surface, stage_foreground,
         wait_for_foreground_to_settle,
     };
-    use crate::tree::element::UIAElement;
     use crate::tree::fixture_menu::MenuFixture;
     use crate::tree::fixture_window;
+    use crate::tree::test_support::rooted_child_count;
     use agent_desktop_core::{InteractionPolicy, ObservationOps, ProcessId, SystemOps, WindowInfo};
     use std::time::Duration;
 
@@ -106,17 +102,6 @@ mod shell_surfaces {
             bounds: None,
             state: Default::default(),
         }
-    }
-
-    fn rooted_child_count(root: &UIAElement) -> usize {
-        use uiautomation::types::TreeScope;
-
-        let client = crate::tree::automation::automation_client().expect("client");
-        let condition = client.create_true_condition().expect("condition");
-        root.0
-            .find_all(TreeScope::Children, &condition)
-            .expect("the rooted surface's children")
-            .len()
     }
 
     /// The resolution assertion: the advertised kind roots through its own

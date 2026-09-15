@@ -1,21 +1,18 @@
-use super::click_chain_judged_for;
+use super::{ClickAvailability, click_chain_judged_for};
 use crate::actions::chain::DeliveryOutcome;
 use crate::actions::disclosure::{DisclosureInput, ExpandKind, disclosure_judged_for};
 use crate::actions::focus::focus_from_delivery;
 use crate::actions::scroll::{ScrollPlan, scroll_judged_for};
 use crate::actions::select::{SelectOps, SelectPlan, select_judged_for};
-use crate::actions::toggle_state::toggle_judged_for;
-use crate::actions::value_write::set_value_judged_for;
+use crate::actions::toggle_state::{ToggleAvailability, toggle_judged_for};
+use crate::actions::value_write::{SetValuePlan, set_value_judged_for};
+use crate::system::test_time::deadline;
 use crate::tree::actions::resolve_actions;
 use crate::tree::properties::ElementProperties;
 use crate::tree::property_ids::TreeProperty;
 use crate::tree::property_outcome::{PropertyOutcome, PropertyValue};
-use agent_desktop_core::{ActionStepOutcome, Deadline, InteractionPolicy, capability};
+use agent_desktop_core::{ActionStepOutcome, InteractionPolicy, capability};
 use std::cell::Cell;
-
-fn short_deadline() -> Deadline {
-    Deadline::after(5_000).expect("deadline")
-}
 
 fn known_flag(value: bool) -> PropertyOutcome {
     PropertyOutcome::Known(PropertyValue::Flag(value))
@@ -52,10 +49,12 @@ fn r2_invoke_advertisement_reaches_click_rung() {
     let invoke = Cell::new(0u8);
     let legacy = Cell::new(0u8);
     let steps = click_chain_judged_for(
-        short_deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
-        true,
-        false,
+        ClickAvailability {
+            invoke_available: true,
+            legacy_available: false,
+        },
         || {
             invoke.set(invoke.get() + 1);
             Ok(DeliveryOutcome::DeliveredUnverified)
@@ -83,10 +82,12 @@ fn r2_legacy_advertisement_reaches_legacy_rung() {
     let invoke = Cell::new(0u8);
     let legacy = Cell::new(0u8);
     let steps = click_chain_judged_for(
-        short_deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
-        false,
-        true,
+        ClickAvailability {
+            invoke_available: false,
+            legacy_available: true,
+        },
         || {
             invoke.set(invoke.get() + 1);
             Ok(DeliveryOutcome::DeliveredUnverified)
@@ -133,11 +134,13 @@ fn r2_set_value_advertisement_reaches_value_rung() {
 
     let value = Cell::new(0u8);
     let steps = set_value_judged_for(
-        short_deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
-        "x",
-        true,
-        false,
+        SetValuePlan {
+            value: "x",
+            value_writable: true,
+            range_available: false,
+        },
         || {
             value.set(value.get() + 1);
             Ok(DeliveryOutcome::DeliveredVerified)
@@ -160,10 +163,12 @@ fn r2_toggle_advertisement_reaches_toggle_rung() {
 
     let toggle = Cell::new(0u8);
     let steps = toggle_judged_for(
-        short_deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
-        true,
-        false,
+        ToggleAvailability {
+            toggle_ok: true,
+            invoke_ok: false,
+        },
         || {
             toggle.set(toggle.get() + 1);
             Ok(DeliveryOutcome::DeliveredVerified)
@@ -187,7 +192,7 @@ fn r2_expand_collapse_advertisement_reaches_disclosure_rung() {
 
     let expand = Cell::new(0u8);
     let steps = disclosure_judged_for(
-        short_deadline(),
+        deadline(5_000),
         InteractionPolicy::headless(),
         DisclosureInput {
             want_expanded: true,
@@ -225,7 +230,7 @@ fn r2_selection_item_advertisement_reaches_select_arm() {
         Ok(DeliveryOutcome::DeliveredVerified)
     };
     let steps = select_judged_for(
-        short_deadline(),
+        deadline(5_000),
         SelectPlan {
             self_match: true,
             needs_expand: false,
@@ -260,7 +265,7 @@ fn r2_scroll_advertisement_reaches_scroll_arm() {
     };
     let mut observe = || true;
     let steps = scroll_judged_for(
-        short_deadline(),
+        deadline(5_000),
         ScrollPlan {
             scroll_available: true,
             axis_scrollable: true,

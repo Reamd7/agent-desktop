@@ -18,7 +18,7 @@ fn scratch_launch_returns_window_for_created_process() {
     let window = launch_app_impl(
         probe.to_str().expect("utf8 path"),
         &probe_launch_options(false, 8_000),
-        deadline(),
+        deadline(10_000),
     )
     .expect("launch notepad probe");
     let _guard = KillOnDrop(window.pid);
@@ -47,7 +47,7 @@ fn attach_true_reuses_single_running_instance() {
     let window = launch_app_impl(
         probe.to_str().expect("utf8 path"),
         &probe_launch_options(true, 8_000),
-        deadline(),
+        deadline(10_000),
     )
     .expect("attach");
     assert_eq!(window.pid, before[0]);
@@ -73,7 +73,7 @@ fn attach_false_fails_naming_running_pid() {
             attach_if_running: false,
             ..Default::default()
         },
-        deadline(),
+        deadline(10_000),
     )
     .expect_err("no-attach must fail");
     assert_eq!(error.code, ErrorCode::ActionFailed);
@@ -137,7 +137,7 @@ fn two_matches_are_ambiguous_before_launch() {
             attach_if_running: true,
             ..Default::default()
         },
-        deadline(),
+        deadline(10_000),
     )
     .expect_err("ambiguous");
     assert_eq!(error.code, ErrorCode::AmbiguousTarget);
@@ -161,8 +161,12 @@ fn cwd_is_honored_for_create_process() {
         timeout_ms: 0,
         ..Default::default()
     };
-    let result = launch_app_impl(probe.to_str().expect("utf8 path"), &options, deadline())
-        .expect("a windowless probe is a successful launch");
+    let result = launch_app_impl(
+        probe.to_str().expect("utf8 path"),
+        &options,
+        deadline(10_000),
+    )
+    .expect("a windowless probe is a successful launch");
     let _guard = KillOnDrop(result.pid);
     assert!(
         result.window.is_none(),
@@ -208,7 +212,7 @@ fn timeout_zero_checks_once_for_process_without_window() {
             timeout_ms: 0,
             ..Default::default()
         },
-        deadline(),
+        deadline(10_000),
     )
     .expect("a windowless process is a successful launch");
     let _guard = KillOnDrop(result.pid);
@@ -252,7 +256,7 @@ fn bare_name_never_chooses_planted_binary_in_current_directory() {
     let window = launch_app_impl(
         resolved.to_str().expect("utf8 path"),
         &probe_launch_options(false, 8_000),
-        deadline(),
+        deadline(10_000),
     )
     .expect("launch system notepad");
     let _guard = KillOnDrop(window.pid);
