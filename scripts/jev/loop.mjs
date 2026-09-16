@@ -42,15 +42,25 @@ const tail = (ref) => ref.split(":").pop();
 
 export const collect = (tree) => {
   const found = [];
-  const walk = (node, path) => {
+  const walk = (node, path, parentRole) => {
     const self = `${node.role}${quoted(node.name)}`;
-    if (node.ref_id) found.push({ ...node, path });
+    if (node.ref_id) found.push({ ...node, path, parentRole });
     const next = node.children?.length ? [...path, self] : path;
-    for (const child of node.children ?? []) walk(child, next);
+    for (const child of node.children ?? []) walk(child, next, node.role);
   };
-  walk(tree, []);
+  walk(tree, [], null);
   return found;
 };
+
+/**
+ * An element Jev cannot tell apart from its neighbours is noise, and 150 noise
+ * options spread the choice until nothing clears the confidence gate. A macOS
+ * open panel emits one cell per treeitem and one unnamed row per file; both
+ * are dropped here.
+ */
+export const isDistinct = (node) =>
+  !(node.role === "cell" && node.parentRole === "treeitem") &&
+  Boolean(node.name || node.description);
 
 /** The safety gate: an element the loop refuses to offer Jev at all. */
 export const isReachable = (node) => {
@@ -67,10 +77,11 @@ const where = (node) => (node.path.length ? ` Inside ${node.path.join(" > ")}.` 
 export const buildActions = (refs, values = {}) => {
   const actions = [];
   for (const node of refs.filter(isReachable)) {
-    const what = `${node.role}${quoted(node.name)}`;
+    const what = `${node.role}${quoted(node.name ?? node.description)}`;
     const has = node.available_actions ?? [];
+    const distinct = isDistinct(node);
     for (const [axAction, verb] of Object.entries(FROM_ACTION)) {
-      if (!has.includes(axAction)) continue;
+      if (!has.includes(axAction) || !distinct) continue;
       actions.push({
         key: `${verb}_${tail(node.ref_id)}`,
         label: `${verb} the ${what}.${where(node)}`,
@@ -86,7 +97,7 @@ export const buildActions = (refs, values = {}) => {
         });
       }
     }
-    if (TEXT_ROLES.has(node.role) && (has.includes("SetValue") || has.includes("TypeText"))) {
+    if (distinct && TEXT_ROLES.has(node.role) && (has.includes("SetValue") || has.includes("TypeText"))) {
       const verb = has.includes("SetValue") ? "set-value" : "type";
       for (const [name, text] of Object.entries(values)) {
         actions.push({

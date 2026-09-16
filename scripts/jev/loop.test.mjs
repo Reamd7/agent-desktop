@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildActions, buildRequest, collect, decide, isReachable, stopReason } from "./loop.mjs";
+import { buildActions, buildRequest, collect, decide, isDistinct, isReachable, stopReason } from "./loop.mjs";
 
 const SNAP = "s8f3k2p9";
 const tree = {
@@ -58,6 +58,26 @@ assert.ok(!buildActions(withHandle, { name: "poem.txt" }).some((a) => a.key.star
 
 // With no supplied values there is no way to enter text at all.
 assert.ok(!buildActions(refs, {}).some((a) => a.key.startsWith("set_")));
+
+// A macOS open panel wraps every treeitem in a cell and lists every file as an
+// unnamed textfield. Offering all of them spread one real choice across ~150
+// look-alike options and dropped confidence to 0.37.
+const panel = collect({
+  role: "window",
+  children: [
+    { ref_id: "@s:e1", role: "treeitem", name: "Documents", available_actions: ["Click"],
+      children: [{ ref_id: "@s:e2", role: "cell", name: "Documents", available_actions: ["Click"] }] },
+    { ref_id: "@s:e3", role: "textfield", value: "Poem.rtf", available_actions: ["Click", "SetValue"] },
+    { ref_id: "@s:e4", role: "button", name: "New Document", available_actions: ["Click"] },
+  ],
+});
+assert.ok(isDistinct(panel[0]));
+assert.ok(!isDistinct(panel[1]), "a cell under a treeitem repeats its parent");
+assert.ok(!isDistinct(panel[2]), "an unnamed file row cannot be told apart");
+assert.deepEqual(
+  buildActions(panel, { name: "poem.txt" }).map((a) => a.key).filter((k) => !k.startsWith("press_")),
+  ["click_e1", "click_e4"],
+);
 
 const req = buildRequest("save the file", { app: "TextEdit", window: "Untitled" }, actions, []);
 assert.deepEqual(Object.keys(req.questions), ["next_action", "goal_complete", "needs_human"]);
