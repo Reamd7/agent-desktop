@@ -1,92 +1,108 @@
 ---
 name: jev-desktop
-description: Run a desktop task from a recipe of prose steps. The recipe owns the verb, the order and the stopping point; TypeSafe's Jev model answers one question per step — which element the step describes. Use for a repeatable task whose steps must re-resolve against the live UI on every run, so a renamed or moved control does not break the script. Not for open-ended tasks — Jev holds no plan and no memory, so it cannot decide what to do next.
+description: Resolve one plain-language intent against the live screen and get back the agent-desktop command that carries it out, without ever reading the accessibility tree. Use when driving a desktop app step by step and you want to keep a 150-element JSON tree out of your context — you hold the goal and the memory, the script and TypeSafe's Jev model hold the screen. Covers which element, which command, and whether it is safe to act.
 ---
 
 # jev-desktop
 
+You keep the goal, the plan and the memory. You send one sentence. You get back
+one small object. The tree never enters your context.
+
 ```sh
-export TYPESAFE_API_KEY=...
-node scripts/jev/run.mjs --app TextEdit --recipe scripts/jev/recipes/save-a-note.json \
-  --value body="Morning over the dock." --value name=poem.txt
+node scripts/jev/act.mjs --app TextEdit --execute \
+  --text "Morning over the dock." "type this text into the main writing area"
 ```
-
-```
- 1  press cmd+n  ok
- 2  set-value — the main editable body of the document [Untitled 4]
-    ok: agent-desktop set-value @s33yj9i0fa1yv4:e2 Morning over the dock.   conf 0.92
- 3  press cmd+s  ok
- 4  set-value — the field that holds the file name to save as [Untitled 4]
-    ok: agent-desktop set-value @s12zr2g972nji3:e147 poem.txt   conf 0.95
- 5  press return  ok
-done
-```
-
-## The recipe
-
-A JSON array. Each step is either a key combo or a verb plus a prose target.
 
 ```json
-[
-  { "combo": "cmd+n", "settle": 1000 },
-  { "verb": "set-value", "target": "the main editable body of the document", "value": "body" },
-  { "combo": "cmd+s", "settle": 1500 },
-  { "verb": "set-value", "target": "the field that holds the file name to save as", "value": "name" },
-  { "combo": "return", "settle": 1500 }
-]
+{
+  "ok": true,
+  "app": "TextEdit", "window": "Untitled 3", "surface": "sheet",
+  "element": { "ref": "@s1:e139", "role": "textfield", "name": "Save As:",
+               "where": "sheet \"save\" > group" },
+  "command": "set-value",
+  "argv": ["set-value", "@s1:e139", "poem.txt"],
+  "decision": "act",
+  "confidence": { "target": 0.99, "command": 0.88 },
+  "gates": { "present": 0.94, "destructive": 0.31, "needs_text": 0.87 },
+  "runner_up": [{ "ref": "@s1:e137", "what": "textfield", "p": 0.02 }],
+  "notes": [],
+  "executed": { "ok": true, "delivery": "delivered_verified" }
+}
 ```
 
-| Field | Meaning |
+## Calling it
+
+| Flag | Meaning |
 | --- | --- |
-| `verb` | Any agent-desktop interaction command. |
-| `target` | Prose. Describe the element the way a person would. |
-| `value` | Names a `--value` key. Jev returns choices, never strings, so text is always yours. |
-| `combo` | A key press. Asks Jev nothing. |
-| `settle` | Milliseconds to wait after the step. |
-| `direction` | For `scroll`. Defaults to down. |
+| `--app <name>` | Required. |
+| `--execute` | Run the command when `decision` is `act`. Without it, nothing runs. |
+| `--text "…"` | Text the intent needs. Jev returns choices, never strings. |
+| `--root @ref` | Resolve inside one container instead of the whole window. |
+| `--bin <path>` | agent-desktop binary. Defaults to the release build, then `PATH`. |
 
-Flags: `--app`, `--recipe`, `--value k=text`, `--min <p>` (default 0.55),
-`--dry-run`, `--bin`.
+**Phrase the intent as an action, not as an element.** `"type this text into the
+main writing area"` resolves to `type`. `"the main writing area"` names no
+operation and resolved to `focus` in testing. Describe the target the way a
+person would — `"the field holding the name the file will be saved under"` —
+not the way the tree names it.
 
-Write the target the way a person would say it. `"the field that holds the file
-name"` is a fair description. `"the textfield named Save As:"` restates the
-answer and tests nothing.
+## Reading `decision`
+
+| `decision` | What it means | What you do |
+| --- | --- | --- |
+| `act` | One element clearly matches and the confidence clears the bar for this action's risk. | Nothing. With `--execute` it already ran. |
+| `confirm` | The match is plausible but under the bar. | Ask the user, or re-phrase the intent and call again. |
+| `abstain` | Jev answered `none`, the element is probably not on this screen, or two elements fit equally. | The screen is not where you think. Open the surface you need, then call again. |
+| `needs_text` | The command takes text and none was supplied. | Call again with `--text`. |
+
+`why` always carries the reason in one sentence. `runner_up` shows what else it
+considered, which is usually enough to tell a wrong screen from a vague intent.
 
 ## What the script decides, not Jev
 
-- Only elements that advertise the step's verb reach the choice. A readonly
-  combobox offers `click`, never `set-value`.
-- Elements that are `disabled` or `hidden` are never offered.
-- A cell that repeats its treeitem parent is dropped, and so is an unnamed
-  element that shares its role with another. An unnamed element that is the
-  only one of its role stays — a TextEdit document body is exactly that.
-- When a sheet, alert, menu or popover is up, the script reads that surface
-  instead of the window. In the window tree those elements carry `offscreen`
-  and every one of them would be dropped.
+- **Risk sets the bar.** The answer says what; confidence says whether to act.
+  An ordinary action needs 0.70. One that Jev rates `destructive` at 0.50 or
+  more needs 0.90 — writing a file, deleting, sending, confirming a warning.
+  Below 0.55 nothing acts at all.
+- **The command is reconciled against the element.** Both questions are
+  answered in parallel and neither sees the other, so code checks the chosen
+  verb against the element's advertised actions. A readonly combobox gets
+  `click`, never `set-value`. A `--text` payload with a non-text verb corrects
+  the verb, because the caller supplying text is evidence Jev does not have.
+- **An open surface wins.** When a sheet, alert, menu or popover is up, the
+  script reads that surface instead of the window. In the window tree those
+  elements carry `offscreen` and would all be dropped.
+- **Disabled and hidden elements are never offered.** Everything else is,
+  including unnamed rows — a row is told apart by the value it holds, and a
+  Choice does better with the full list than with a shortlist.
 
-## Where it stops
+## How the request is shaped
 
-The runner exits non-zero and names the step. It never substitutes an action.
+One call carries five questions. They are answered in parallel, so the
+speculative ones cost tokens and no latency.
 
-| Condition | Meaning |
-| --- | --- |
-| Jev answers `none` | The screen is not in the state the step expects. |
-| confidence below `--min` | Two elements fit the description equally well. |
-| no element supports the verb | The recipe asks for something this screen cannot do. |
-| the command fails | agent-desktop returned an error; its code is printed. |
+| Question | Type | Asks |
+| --- | --- | --- |
+| `target` | choice | Which element the intent refers to, plus `none`. |
+| `command` | choice | Which of the 16 interaction verbs it asks for. |
+| `present` | noul | Is the thing on this screen at all? |
+| `destructive` | noul | Would this be hard to undo? |
+| `needs_text` | noul | Does this need text from the caller? |
+
+A Choice accepts 255 options, so up to 254 elements go in one pass. When the
+first pass lands under 0.70 the top five are re-asked with richer descriptions.
+A screen with more than 254 elements says so in `notes`; use `--root @ref`.
 
 ## Known limits
 
-- Jev holds no plan and no memory. You write the order. It will not recover
-  from a screen the recipe did not anticipate.
-- One full snapshot per step, about 3 s. `--skeleton` is about 0.2 s but the
-  runner does not drill yet.
-- No retry and no backoff. A 429 ends the run.
-- Held input is unavailable, so there is no drag with sustain and no held key.
-  See `crates/core/src/commands/input_hold_policy.rs`.
+- One snapshot per call, about 3 s on a dense app. `--root` is far cheaper.
+- No retry and no backoff. A 429 ends the call.
+- Held input is unavailable, so no sustained key and no drag with hold. See
+  `crates/core/src/commands/input_hold_policy.rs`.
+- `press` is not resolved here. It needs no element, so send it directly.
 
 ## Checks
 
 ```sh
-node scripts/jev/run.test.mjs
+node scripts/jev/act.test.mjs
 ```
