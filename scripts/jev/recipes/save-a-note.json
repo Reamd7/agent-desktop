@@ -1,0 +1,7 @@
+[
+  { "combo": "cmd+n", "settle": 1000 },
+  { "verb": "set-value", "target": "the main editable body of the document, where the text goes", "value": "body" },
+  { "combo": "cmd+s", "settle": 1500 },
+  { "verb": "set-value", "target": "the field that holds the file name to save as", "value": "name" },
+  { "combo": "return", "settle": 1500 }
+]
