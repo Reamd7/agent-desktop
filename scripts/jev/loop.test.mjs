@@ -49,8 +49,16 @@ assert.deepEqual(actions.find((a) => a.key === "scroll_e7_down").argv, [
   "down",
 ]);
 
-// Key combos are always offered and carry no ref.
-assert.deepEqual(actions.find((a) => a.key === "press_cmd+s").argv, ["press", "cmd+s"]);
+// Default combos are always offered and carry no ref; --key adds any other.
+assert.deepEqual(actions.find((a) => a.key === "press_escape").argv, ["press", "escape"]);
+assert.equal(actions.find((a) => a.key === "press_cmd+s"), undefined);
+assert.deepEqual(
+  buildActions(refs, {}, ["cmd+s"]).find((a) => a.key === "press_cmd+s").argv,
+  ["press", "cmd+s"],
+);
+
+// A pause is an action, so an app that needs a moment does not look like a stall.
+assert.deepEqual(actions.find((a) => a.key === "wait_500").argv, ["wait", "500"]);
 
 // A scrollbar handle advertises SetValue too; it must never be a text target.
 const withHandle = collect({ role: "window", children: [{ ref_id: "@s:e9", role: "handle", value: "0", available_actions: ["SetValue"] }] });
@@ -75,7 +83,7 @@ assert.ok(isDistinct(panel[0]));
 assert.ok(!isDistinct(panel[1]), "a cell under a treeitem repeats its parent");
 assert.ok(!isDistinct(panel[2]), "an unnamed file row cannot be told apart");
 assert.deepEqual(
-  buildActions(panel, { name: "poem.txt" }).map((a) => a.key).filter((k) => !k.startsWith("press_")),
+  buildActions(panel, { name: "poem.txt" }).map((a) => a.key).filter((k) => !/^(press|wait)_/.test(k)),
   ["click_e1", "click_e4"],
 );
 

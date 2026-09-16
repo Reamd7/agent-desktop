@@ -20,12 +20,19 @@ import { fileURLToPath } from "node:url";
 const API = "https://api.typesafe.ai/v1/systemone";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-/** Key combos the loop may send at any time. No ref, so no safety check. */
+/**
+ * Key combos always on offer. No ref, so no safety check. A task that needs
+ * another combo adds it with --key; hardcoding this list was what made the
+ * loop unable to reach anything a menu shortcut owns.
+ */
 const KEYS = {
   return: "Press Return to commit the focused field or the default button.",
   escape: "Press Escape to dismiss the open sheet, menu or popover.",
-  "cmd+s": "Press Command-S to save.",
+  tab: "Press Tab to move focus to the next control.",
 };
+
+/** Pauses the loop may take when the app needs a moment. */
+const WAITS = { 500: "half a second", 2000: "two seconds" };
 
 /** An advertised AX action maps to exactly one agent-desktop verb. */
 const FROM_ACTION = { Click: "click", Toggle: "toggle", Expand: "expand", Collapse: "collapse" };
@@ -74,7 +81,7 @@ const where = (node) => (node.path.length ? ` Inside ${node.path.join(" > ")}.` 
  * Builds the shortlist. An element only contributes verbs it actually
  * advertises, so an unsupported action can never reach the choice.
  */
-export const buildActions = (refs, values = {}) => {
+export const buildActions = (refs, values = {}, keys = []) => {
   const actions = [];
   for (const node of refs.filter(isReachable)) {
     const what = `${node.role}${quoted(node.name ?? node.description)}`;
@@ -111,8 +118,16 @@ export const buildActions = (refs, values = {}) => {
       }
     }
   }
-  for (const [combo, label] of Object.entries(KEYS)) {
+  const combos = { ...KEYS, ...Object.fromEntries(keys.map((c) => [c, `Press ${c}.`])) };
+  for (const [combo, label] of Object.entries(combos)) {
     actions.push({ key: `press_${combo}`, label, argv: ["press", combo] });
+  }
+  for (const [ms, human] of Object.entries(WAITS)) {
+    actions.push({
+      key: `wait_${ms}`,
+      label: `Wait ${human} for the application to catch up. Choose this only when the screen is mid-change.`,
+      argv: ["wait", ms],
+    });
   }
   return actions;
 };
@@ -202,6 +217,7 @@ const main = async (argv) => {
     ? join(REPO, "target/release/agent-desktop")
     : "agent-desktop");
   const maxSteps = Number(flag("max-steps")) || 12;
+  const keys = argv.flatMap((a, i) => (argv[i - 1] === "--key" ? [a] : []));
   const dryRun = argv.includes("--dry-run");
   const values = Object.fromEntries(
     argv.flatMap((a, i) => (argv[i - 1] === "--value" ? [a.split(/=(.*)/s).slice(0, 2)] : [])),
@@ -211,7 +227,7 @@ const main = async (argv) => {
     .join(" ");
 
   if (!app || !goal) {
-    console.error('usage: loop.mjs --app <name> [--value k=text] [--max-steps n] [--dry-run] "<goal>"');
+    console.error('usage: loop.mjs --app <name> [--value k=text] [--key combo] [--max-steps n] [--dry-run] "<goal>"');
     process.exit(2);
   }
   if (!process.env.TYPESAFE_API_KEY) {
@@ -230,7 +246,7 @@ const main = async (argv) => {
       process.exit(1);
     }
     const refs = collect(snap.data.tree);
-    const actions = buildActions(refs, values);
+    const actions = buildActions(refs, values, keys);
     const surface = { app: snap.data.app, window: snap.data.window?.title ?? null };
 
     const print = fingerprint(refs);
