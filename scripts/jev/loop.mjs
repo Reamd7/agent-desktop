@@ -47,6 +47,22 @@ const TEXT_ROLES = new Set(["textfield", "textarea", "searchfield", "combobox"])
 const quoted = (s) => (s ? ` "${s}"` : "");
 const tail = (ref) => ref.split(":").pop();
 
+/**
+ * A sheet, menu or alert owns input while it is up. Its elements do appear in
+ * the window tree, but marked offscreen, so the safety gate drops every one of
+ * them and the loop runs out of actions. Reading the surface directly is the
+ * only way to act on what the user is actually looking at.
+ */
+export const overlayRole = (tree) => {
+  let found = null;
+  const walk = (n) => {
+    if (!found && ["sheet", "alert", "menu", "popover"].includes(n.role)) found = n.role;
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(tree);
+  return found;
+};
+
 export const collect = (tree) => {
   const found = [];
   const walk = (node, path, parentRole) => {
@@ -62,12 +78,17 @@ export const collect = (tree) => {
 /**
  * An element Jev cannot tell apart from its neighbours is noise, and 150 noise
  * options spread the choice until nothing clears the confidence gate. A macOS
- * open panel emits one cell per treeitem and one unnamed row per file; both
- * are dropped here.
+ * open panel emits one cell per treeitem and one unnamed row per file.
+ *
+ * A name is not required. A TextEdit document body is an unnamed textfield,
+ * and requiring a name dropped the only element that mattered. An element
+ * that is the sole holder of its role on screen is nameable by role alone.
  */
-export const isDistinct = (node) =>
-  !(node.role === "cell" && node.parentRole === "treeitem") &&
-  Boolean(node.name || node.description);
+export const isDistinct = (node, peers = []) => {
+  if (node.role === "cell" && node.parentRole === "treeitem") return false;
+  if (node.name || node.description) return true;
+  return peers.filter((p) => p.role === node.role).length === 1;
+};
 
 /** The safety gate: an element the loop refuses to offer Jev at all. */
 export const isReachable = (node) => {
@@ -83,10 +104,11 @@ const where = (node) => (node.path.length ? ` Inside ${node.path.join(" > ")}.` 
  */
 export const buildActions = (refs, values = {}, keys = []) => {
   const actions = [];
-  for (const node of refs.filter(isReachable)) {
-    const what = `${node.role}${quoted(node.name ?? node.description)}`;
+  const peers = refs.filter(isReachable);
+  for (const node of peers) {
+    const what = `${node.role}${quoted(node.name ?? node.description)}` + (node.name || node.description ? "" : " (the only one on screen)");
     const has = node.available_actions ?? [];
-    const distinct = isDistinct(node);
+    const distinct = isDistinct(node, peers);
     for (const [axAction, verb] of Object.entries(FROM_ACTION)) {
       if (!has.includes(axAction) || !distinct) continue;
       actions.push({
@@ -240,10 +262,15 @@ const main = async (argv) => {
   let stalls = 0;
 
   for (let step = 1; step <= maxSteps; step += 1) {
-    const snap = run(bin, ["snapshot", "--app", app, "-i", "--compact"]);
+    let snap = run(bin, ["snapshot", "--app", app, "-i", "--compact"]);
     if (!snap.ok) {
       console.error(`step ${step}: snapshot failed: ${snap.error?.code} ${snap.error?.message}`);
       process.exit(1);
+    }
+    const overlay = overlayRole(snap.data.tree);
+    if (overlay) {
+      const surface = run(bin, ["snapshot", "--app", app, "--surface", overlay, "-i", "--compact"]);
+      if (surface.ok) snap = surface;
     }
     const refs = collect(snap.data.tree);
     const actions = buildActions(refs, values, keys);

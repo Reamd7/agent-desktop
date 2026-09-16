@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildActions, buildRequest, collect, decide, isDistinct, isReachable, stopReason } from "./loop.mjs";
+import { buildActions, buildRequest, collect, decide, isDistinct, isReachable, overlayRole, stopReason } from "./loop.mjs";
 
 const SNAP = "s8f3k2p9";
 const tree = {
@@ -76,12 +76,21 @@ const panel = collect({
     { ref_id: "@s:e1", role: "treeitem", name: "Documents", available_actions: ["Click"],
       children: [{ ref_id: "@s:e2", role: "cell", name: "Documents", available_actions: ["Click"] }] },
     { ref_id: "@s:e3", role: "textfield", value: "Poem.rtf", available_actions: ["Click", "SetValue"] },
+    { ref_id: "@s:e5", role: "textfield", value: "Notes.rtf", available_actions: ["Click", "SetValue"] },
     { ref_id: "@s:e4", role: "button", name: "New Document", available_actions: ["Click"] },
   ],
 });
-assert.ok(isDistinct(panel[0]));
-assert.ok(!isDistinct(panel[1]), "a cell under a treeitem repeats its parent");
-assert.ok(!isDistinct(panel[2]), "an unnamed file row cannot be told apart");
+assert.ok(isDistinct(panel[0], panel));
+assert.ok(!isDistinct(panel[1], panel), "a cell under a treeitem repeats its parent");
+assert.ok(!isDistinct(panel[2], panel), "an unnamed file row cannot be told apart");
+
+// A TextEdit document body is an unnamed textfield and must survive.
+const doc = collect({ role: "window", name: "Untitled", children: [
+  { ref_id: "@s:e1", role: "textfield", available_actions: ["TypeText"] },
+  { ref_id: "@s:e2", role: "combobox", name: "font size", value: "12", available_actions: ["SetValue"] },
+]});
+assert.ok(isDistinct(doc[0], doc), "the sole textfield on screen is nameable by role");
+assert.ok(buildActions(doc, { poem: "hi" }).some((a) => a.key === "set_e1_poem"));
 assert.deepEqual(
   buildActions(panel, { name: "poem.txt" }).map((a) => a.key).filter((k) => !/^(press|wait)_/.test(k)),
   ["click_e1", "click_e4"],
@@ -113,5 +122,10 @@ assert.match(
   stopReason(answer({ next_action: { type: "choice", choice: "click_e3", confidence: 0.3 } })),
   /unsure/,
 );
+
+// A sheet in the window tree redirects the next read to that surface.
+assert.equal(overlayRole(tree), null);
+assert.equal(overlayRole({ role: "window", children: [{ role: "sheet", name: "save" }] }), "sheet");
+assert.equal(overlayRole({ role: "window", children: [{ role: "group", children: [{ role: "menu" }] }] }), "menu");
 
 console.log("ok");
