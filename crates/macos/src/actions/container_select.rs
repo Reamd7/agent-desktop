@@ -27,8 +27,8 @@ mod imp {
         ["AXSelectedRows", "AXSelectedChildren", "AXSelectedCells"];
     const MAX_ANCESTOR_WALK: usize = 6;
     const MAX_SELECTION_READBACK: usize = 64;
-    const SELECTION_SETTLE_MS: u64 = 300;
-    const SELECTION_POLL_MS: u64 = 25;
+    pub(crate) const SELECTION_SETTLE_MS: u64 = 300;
+    pub(crate) const SELECTION_POLL_MS: u64 = 25;
 
     /// Reading the subrole would add nothing: no subrole moves an element into
     /// or out of this set, because the ones that redefine a native role keep a
@@ -233,7 +233,9 @@ mod imp {
     }
 }
 
-pub(crate) use imp::{element_activates_by_selection, select_within_container};
+pub(crate) use imp::{
+    SELECTION_POLL_MS, SELECTION_SETTLE_MS, element_activates_by_selection, select_within_container,
+};
 
 #[cfg(test)]
 mod tests {

@@ -19,15 +19,11 @@ const screen = collect({
 assert.equal(screen.length, 7);
 assert.deepEqual(screen[0].path, ['window "Untitled"']);
 
-// Only unreachable elements and cells repeating their treeitem are withheld.
-// Everything else is offered: a Choice does better with the full list.
 const offered = offerable(screen).map((n) => n.ref_id);
 assert.ok(!offered.includes(`@${S}:e4`), "a disabled element is never offered");
 assert.ok(!offered.includes(`@${S}:e6`), "a cell repeats its treeitem parent");
 assert.deepEqual(offered, [`@${S}:e1`, `@${S}:e2`, `@${S}:e3`, `@${S}:e5`, `@${S}:e7`]);
 
-// Criteria are objects, not sentences; the value an element holds is what
-// tells two unnamed rows apart.
 const d = describe(screen[0], false);
 assert.equal(d.what, 'textfield "Save As:"');
 assert.equal(d.holds, "Untitled.rtf");
@@ -59,25 +55,20 @@ assert.equal(readAnswers(body()).target, `@${S}:e3`);
 assert.equal(readAnswers(body()).destructive, 0.1);
 assert.ok(readAnswers({}).error);
 
-// Target and command are answered in parallel, so code reconciles them. The
-// readonly combobox advertises Click and not SetValue.
 assert.deepEqual(reconcile("set-value", screen[1]), { verb: "click", corrected: true });
 assert.deepEqual(reconcile("click", screen[2]), { verb: "click", corrected: false });
 assert.deepEqual(reconcile("set-value", screen[6]), { verb: "type", corrected: true });
 
-// Supplied text is evidence Jev does not have: a text payload with a
-// non-text verb means the verb is wrong. This is the `focus` bug.
 assert.deepEqual(reconcile("focus", screen[6], true), { verb: "type", corrected: true });
 assert.deepEqual(reconcile("focus", screen[0], true), { verb: "set-value", corrected: true });
 assert.deepEqual(reconcile("focus", screen[2], false).verb, "click");
 
-// Confidence is the second axis, and the bar rises with how hard it is to undo.
 assert.equal(route(readAnswers(body())).decision, "act");
 assert.equal(route(readAnswers(body({ target: { type: "choice", choice: "none", confidence: 0.9, probabilities: {} } }))).decision, "abstain");
 assert.equal(route(readAnswers(body({ present: { type: "noul", noul: 0.1 } }))).decision, "abstain");
 assert.equal(route(readAnswers(body({ target: { type: "choice", choice: `@${S}:e3`, confidence: 0.4, probabilities: {} } }))).decision, "abstain");
 assert.equal(route(readAnswers(body({ target: { type: "choice", choice: `@${S}:e3`, confidence: 0.62, probabilities: {} } }))).decision, "confirm");
-// The same 0.8 confidence acts on a safe element and only asks on a risky one.
+
 assert.equal(route(readAnswers(body({ target: { type: "choice", choice: `@${S}:e3`, confidence: 0.8, probabilities: {} } }))).decision, "act");
 assert.equal(
   route(readAnswers(body({
@@ -87,7 +78,6 @@ assert.equal(
   "confirm",
 );
 
-// A qualified ref carries a colon; it must reach argv untouched.
 assert.deepEqual(toArgv("click", `@${S}:e3`, null), ["click", `@${S}:e3`]);
 assert.deepEqual(toArgv("set-value", `@${S}:e1`, "poem.txt"), ["set-value", `@${S}:e1`, "poem.txt"]);
 assert.deepEqual(toArgv("scroll", `@${S}:e1`, null), ["scroll", `@${S}:e1`, "--direction", "down"]);

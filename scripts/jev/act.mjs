@@ -18,9 +18,13 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { collect, describe, label, offerable, overlayRole } from "./screen.mjs";
+import { NO_MATCH, route } from "./policy.mjs";
+
+export { collect, describe, label, offerable, overlayRole, route };
+
 const API = "https://api.typesafe.ai/v1/systemone";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const NO_MATCH = "none";
 
 /** A Choice accepts 255 options. One is reserved for the no-match outcome. */
 const MAX_OPTIONS = 254;
@@ -54,76 +58,6 @@ const VERBS = {
 
 const TAKES_TEXT = new Set(Object.entries(VERBS).filter(([, v]) => v.text).map(([k]) => k));
 const NEEDS_HEADED = new Set(Object.entries(VERBS).filter(([, v]) => v.headed).map(([k]) => k));
-
-const quoted = (s) => (s ? ` "${s}"` : "");
-
-export const collect = (tree) => {
-  const found = [];
-  const walk = (node, path, parentRole) => {
-    const self = `${node.role}${quoted(node.name)}`;
-    if (node.ref_id) found.push({ ...node, path, parentRole });
-    const next = node.children?.length ? [...path, self] : path;
-    for (const child of node.children ?? []) walk(child, next, node.role);
-  };
-  walk(tree, [], null);
-  return found;
-};
-
-/** A sheet, menu or alert owns input while it is up, and the window tree marks
- *  its elements offscreen. Reading the surface is the only way to act on it. */
-export const overlayRole = (tree) => {
-  let found = null;
-  const walk = (n) => {
-    if (!found && ["sheet", "alert", "menu", "popover"].includes(n.role)) found = n.role;
-    for (const c of n.children ?? []) walk(c);
-  };
-  walk(tree);
-  return found;
-};
-
-/**
- * The only elements withheld are ones no command can reach. Everything else is
- * offered: the docs are explicit that a Choice does better with the full list
- * than a shortlist, and an unnamed row is still distinguishable by the value it
- * holds.
- *
- * An element that advertises no action is the one that must go. A sidebar
- * category in Numbers publishes its label on a cell and its behaviour on the
- * row around it, and both carry the same name, so the inert cell wins the
- * choice about half the time and every such win ends in POLICY_DENIED. Nothing
- * is lost by withholding it: the row beside it is the element that acts.
- */
-export const offerable = (refs) =>
-  refs.filter((n) => {
-    const s = n.states ?? [];
-    if (s.includes("disabled") || s.includes("hidden")) return false;
-    if (!n.available_actions?.length) return false;
-    return !(n.role === "cell" && n.parentRole === "treeitem");
-  });
-
-/** Structured criteria disambiguate better than a flat sentence. */
-export const describe = (node, rich) => {
-  const d = {
-    what: `${node.role}${quoted(node.name ?? node.description)}`,
-    where: node.path.length ? node.path.join(" > ") : "top level",
-  };
-  if (node.value != null && node.value !== "") d.holds = String(node.value).slice(0, 120);
-  if (node.states?.length) d.state = node.states.join(", ");
-  // A PDF form field carries no name, no description and no help text, so
-  // position is the only thing that tells one from the next. Reading order and
-  // "the box on the left" are answerable from it; nothing else on such a
-  // screen is.
-  if (!d.what.includes('"') && node.bounds) {
-    d.at = `x ${Math.round(node.bounds.x)}, y ${Math.round(node.bounds.y)}`;
-  }
-  if (rich) {
-    if (node.available_actions?.length) d.supports = node.available_actions.join(", ");
-    if (node.children_count) d.contains = `${node.children_count} items not shown`;
-  }
-  return d;
-};
-
-export const label = (n) => `${n.role}${quoted(n.name ?? n.description)}`;
 
 /**
  * One request carries every question. They are answered in parallel, so the
@@ -201,12 +135,12 @@ export const readAnswers = (body) => {
 /**
  * Code corrects the verb, because target and command are answered in parallel
  * and neither can see the other. A readonly combobox that advertises Click but
- * not SetValue must not receive set-value.
+ * not SetValue must not receive set-value. Supplied text is evidence the model
+ * does not have: a text payload against a verb that takes none means the verb is
+ * wrong, not that the text is spare.
  */
 export const reconcile = (verb, node, hasText = false) => {
   const has = node?.available_actions ?? [];
-  // The caller passing --text is evidence Jev does not have. A text payload
-  // with a non-text verb means the verb is wrong, not that the text is spare.
   if (hasText && !VERBS[verb]?.text) {
     if (has.includes("SetValue")) return { verb: "set-value", corrected: true };
     if (has.includes("TypeText")) return { verb: "type", corrected: true };
@@ -217,31 +151,6 @@ export const reconcile = (verb, node, hasText = false) => {
   if (verb === "type" && has.includes("SetValue")) return { verb: "set-value", corrected: true };
   const fallback = Object.entries(VERBS).find(([, v]) => v.needs && has.includes(v.needs));
   return fallback ? { verb: fallback[0], corrected: true } : { verb, corrected: false };
-};
-
-/**
- * Confidence is the second axis: the answer says what, confidence says whether
- * to act. The bar rises with how hard the action is to undo.
- */
-export const route = (a, { floor = 0.55, act = 0.7, risky = 0.9 } = {}) => {
-  if (a.target === NO_MATCH) return { decision: "abstain", why: "nothing on screen matches the intent" };
-  if (a.present !== null && a.present < 0.3) {
-    return { decision: "abstain", why: `the element is probably not on this screen (present ${a.present.toFixed(2)})` };
-  }
-  if (a.targetConfidence < floor) {
-    return { decision: "abstain", why: `two elements fit equally well (${a.targetConfidence.toFixed(2)})` };
-  }
-  const dangerous = a.destructive !== null && a.destructive >= 0.5;
-  const bar = dangerous ? risky : act;
-  if (a.targetConfidence < bar) {
-    return {
-      decision: "confirm",
-      why: dangerous
-        ? `hard to undo (destructive ${a.destructive.toFixed(2)}) and confidence ${a.targetConfidence.toFixed(2)} is under ${risky}`
-        : `confidence ${a.targetConfidence.toFixed(2)} is under ${act}`,
-    };
-  }
-  return { decision: "act", why: null };
 };
 
 export const toArgv = (verb, ref, text) => {
@@ -277,8 +186,10 @@ const ask = async (payload) => {
   return readAnswers(await res.json());
 };
 
-// ponytail: exitCode, not exit(). process.exit() can cut off buffered stdout,
-// and a tool whose JSON truncates is worse than one that fails.
+/**
+ * Sets an exit code rather than calling exit, because exiting can cut off
+ * buffered output and a tool whose JSON truncates is worse than one that fails.
+ */
 const fail = (message, extra = {}) => {
   console.log(JSON.stringify({ ok: false, error: message, ...extra }, null, 2));
   process.exitCode = 1;
@@ -332,8 +243,8 @@ const main = async (argv) => {
   let answers = await ask(buildRequest(intent, surface, candidates));
   if (answers.error) fail(answers.error);
 
-  // A close call gets a second, richer pass over its own top few. Cheap, and
-  // the wide pass only has room for short descriptions.
+  /** A close call is re-asked over its own top few, where descriptions have room to be richer. */
+
   let reranked = false;
   if (answers.target !== NO_MATCH && answers.targetConfidence < RERANK_BELOW) {
     const top = Object.entries(answers.probabilities)
@@ -354,10 +265,9 @@ const main = async (argv) => {
   const byRef = new Map(candidates.map((n) => [n.ref_id, n]));
   const node = byRef.get(answers.target);
   const { verb, corrected } = reconcile(answers.command, node, text !== null);
+
+  /** Only the verb decides whether text is required; the gate is a speculative read of the intent. */
   const decision = route(answers);
-  // Only the verb decides this. The gate is a speculative read of the intent,
-  // and asking a click for text because it scored 0.50 stops an action that
-  // needs no text and never could.
   const missingText = TAKES_TEXT.has(verb) && text === null;
 
   const out = {

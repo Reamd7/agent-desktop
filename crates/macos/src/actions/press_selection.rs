@@ -43,17 +43,37 @@ mod imp {
         ))
     }
 
+    /// A selection appears a moment after the press that caused it. Reading it
+    /// once calls a press that worked an effectless one, and the chain then
+    /// writes a selection that was already on its way. The wait is the same
+    /// bounded one the container write uses, and it ends the instant the
+    /// selection turns on.
     fn selection_after_press(element: &AXElement, deadline: Deadline) -> Option<bool> {
         if !crate::actions::container_select::element_activates_by_selection(element, deadline) {
             return None;
         }
-        crate::tree::attributes::copy_bool_attr_result(
-            element,
-            crate::actions::container_select::SELECTED,
-            deadline,
-        )
-        .ok()
-        .flatten()
+        let settle_end = std::time::Instant::now()
+            + std::time::Duration::from_millis(
+                crate::actions::container_select::SELECTION_SETTLE_MS,
+            );
+        loop {
+            let observed = crate::tree::attributes::copy_bool_attr_result(
+                element,
+                crate::actions::container_select::SELECTED,
+                deadline,
+            )
+            .ok()
+            .flatten();
+            if observed != Some(false)
+                || deadline.is_expired()
+                || std::time::Instant::now() >= settle_end
+            {
+                return observed;
+            }
+            std::thread::sleep(deadline.remaining().min(std::time::Duration::from_millis(
+                crate::actions::container_select::SELECTION_POLL_MS,
+            )));
+        }
     }
 }
 

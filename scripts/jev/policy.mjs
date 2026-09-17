@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 
 
+export const NO_MATCH = "none";
 const MAX_OPTIONS = 254;
 export const MAX_STEPS = 40;
 export const MAX_CALLS = 80;
@@ -69,10 +70,10 @@ export const ARGV = {
  * them and each one is repeated in every head that can act on it, so the shape
  * of this string decides whether the request fits at all.
  */
-export const criterion = (node, index) => {
+export const criterion = (node, index, { values = true } = {}) => {
   const named = node.name ?? node.description;
   const parts = [`[${index}] ${node.role}${named ? ` "${named}"` : ""}`];
-  const holds = node.value == null ? "" : String(node.value).slice(0, 60);
+  const holds = !values || node.value == null ? "" : String(node.value).slice(0, 60);
   if (holds) parts.push(`holds "${holds}"`);
   if (node.states?.length) parts.push(node.states.join(", "));
   if (!named && !holds && node.bounds) parts.push(`at ${Math.round(node.bounds.x)},${Math.round(node.bounds.y)}`);
@@ -92,9 +93,10 @@ export const textSupply = (option) => {
   return { available: () => queue.length > 0, take: async () => queue.shift() ?? null };
 };
 
-export const actionSpace = (nodes, { drillable = true, typable = true } = {}) => {
+export const actionSpace = (nodes, { drillable = true, typable = true, values = true } = {}) => {
   const elements = [];
   const targets = {};
+  let truncated = false;
   for (const node of nodes) {
     const advertised = node.available_actions ?? [];
     const operations = Object.entries(OPS)
@@ -105,14 +107,17 @@ export const actionSpace = (nodes, { drillable = true, typable = true } = {}) =>
     if (!operations.length) continue;
     const index = String(elements.length + 1);
     const holds = node.children_count ? ` · holds ${node.children_count} more` : "";
-    elements.push(criterion(node, index) + holds);
+    elements.push(criterion(node, index, { values }) + holds);
     for (const operation of operations) (targets[operation] ??= {})[index] = node;
-    if (elements.length >= MAX_OPTIONS) break;
+    if (elements.length >= MAX_OPTIONS) {
+      truncated = nodes.indexOf(node) < nodes.length - 1;
+      break;
+    }
   }
-  return { elements, targets };
+  return { elements, targets, truncated };
 };
 
-export const buildRequest = (goal, screen, space, history) => {
+export const buildRequest = (goal, screen, space, history, { values = true } = {}) => {
   const questions = {
     operation: {
       type: "choice",
@@ -130,14 +135,25 @@ export const buildRequest = (goal, screen, space, history) => {
           "Use the values fields already hold and the recent actions. Do not repeat a step that is already satisfied. " +
           "Fill what a control requires before pressing the control that consumes it. " +
           "WAIT only when the control you need is absent or disabled; a recent WAIT is not evidence that anything is loading. " +
-          "DONE needs visible evidence that every part of the goal is met. BLOCKED means no offered operation can help.",
+          "DONE needs visible evidence that every part of the goal is met. BLOCKED means no offered operation can help." +
+          (space.truncated
+            ? " This screen holds more elements than could be offered, so what you need may be missing; prefer DRILL into a region over BLOCKED."
+            : ""),
       },
+    },
+    destructive: {
+      type: "noul",
+      instructions:
+        "Would the operation you are about to choose be hard or impossible to undo on this screen: deleting, " +
+        "overwriting existing content, sending, purchasing, quitting without saving, or confirming a warning?",
     },
   };
   for (const [operation, candidates] of Object.entries(space.targets)) {
     questions[`${operation.toLowerCase()}_target`] = {
       type: "choice",
-      criteria: Object.fromEntries(Object.entries(candidates).map(([index, node]) => [index, criterion(node, index)])),
+      criteria: Object.fromEntries(
+        Object.entries(candidates).map(([index, node]) => [index, criterion(node, index, { values })]),
+      ),
       instructions: {
         goal,
         operation,
@@ -156,6 +172,7 @@ export const buildRequest = (goal, screen, space, history) => {
       window: screen.window,
       surface: screen.surface,
       element_count: space.elements.length,
+      truncated: space.truncated,
       elements: space.elements,
       recent_actions: history.slice(-8),
     },
@@ -181,6 +198,31 @@ export const fingerprint = (nodes) =>
     .update(nodes.map((n) => `${n.role}|${n.name ?? ""}|${n.value ?? ""}|${(n.states ?? []).join(",")}`).join("\n"))
     .digest("hex")
     .slice(0, 12);
+
+/**
+ * Confidence is the second axis: the answer says what, confidence says whether
+ * to act. The bar rises with how hard the action is to undo.
+ */
+export const route = (a, { floor = 0.55, act = 0.7, risky = 0.9 } = {}) => {
+  if (a.target === NO_MATCH) return { decision: "abstain", why: "nothing on screen matches the intent" };
+  if (a.present !== null && a.present < 0.3) {
+    return { decision: "abstain", why: `the element is probably not on this screen (present ${a.present.toFixed(2)})` };
+  }
+  if (a.targetConfidence < floor) {
+    return { decision: "abstain", why: `two elements fit equally well (${a.targetConfidence.toFixed(2)})` };
+  }
+  const dangerous = a.destructive !== null && a.destructive >= 0.5;
+  const bar = dangerous ? risky : act;
+  if (a.targetConfidence < bar) {
+    return {
+      decision: "confirm",
+      why: dangerous
+        ? `hard to undo (destructive ${a.destructive.toFixed(2)}) and confidence ${a.targetConfidence.toFixed(2)} is under ${risky}`
+        : `confidence ${a.targetConfidence.toFixed(2)} is under ${act}`,
+    };
+  }
+  return { decision: "act", why: null };
+};
 
 export const shouldStop = (state) => {
   if (state.operation === "DONE") return "done";

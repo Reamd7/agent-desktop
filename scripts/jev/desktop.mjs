@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { collect, offerable, overlayRole } from "./act.mjs";
+import { collect, offerable, overlayRole } from "./screen.mjs";
 import { ARGV } from "./policy.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -72,26 +72,51 @@ export const observe = (app, root) => {
 };
 
 /**
+ * The clipboard is borrowed, never assumed. It is read only when a paste is
+ * about to need it, so a run that never pastes leaves it untouched. What was
+ * there is put back if it was text; if it held an image, a file, or nothing that
+ * could be read, it is emptied instead, because leaving the run's own string
+ * behind is worse than leaving it empty.
+ */
+export const clipboardGuard = () => {
+  let held = null;
+  return {
+    borrow() {
+      if (held) return;
+      const read = cli("clipboard-get");
+      held = typeof read.data?.text === "string" ? { text: read.data.text } : { unreadable: true };
+    },
+    restore() {
+      if (!held) return;
+      if (held.text === undefined) cli("clipboard-clear");
+      else cli("clipboard-set", held.text);
+      held = null;
+    },
+  };
+};
+
+/**
  * Text goes in through whichever route the application accepts. A direct value
  * write is one verified call, and the applications that refuse it report that
  * refusal, so the paste path runs only when it is needed. A paste arrives whole
  * where one key press per character loses characters and capitals.
  */
-export const enterText = (app, node, text) => {
+export const enterText = (app, node, text, clipboard) => {
   const written = cli("set-value", node.ref_id, text);
   if (written.ok) return { route: "set-value", result: written };
   const focused = cli("focus", node.ref_id);
   if (!focused.ok) return { route: "set-value", result: written };
+  clipboard.borrow();
   cli("clipboard-set", text);
   return { route: "paste", result: cli("press", "cmd+v", "--app", app) };
 };
 
-export const execute = (app, operation, node, text) => {
+export const execute = (app, operation, node, text, clipboard) => {
   if (operation === "WAIT") return { ok: true, delivery: "waited" };
   if (operation === "DRILL") return { ok: true, delivery: "looked", root: node.ref_id };
   if (operation === "WIDEN") return { ok: true, delivery: "looked", root: null };
   if (operation === "TYPE_TEXT") {
-    const { route, result } = enterText(app, node, text);
+    const { route, result } = enterText(app, node, text, clipboard);
     return { ok: result.ok, delivery: result.data?.disposition?.delivery ?? result.error?.code ?? null, route };
   }
   const result = cli(...ARGV[operation](node.ref_id));

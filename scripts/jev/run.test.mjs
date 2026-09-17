@@ -80,9 +80,18 @@ const space = actionSpace(screen());
   const request = buildRequest("save the file", { app: "TextEdit", window: "Untitled" }, space, []);
   assert.deepEqual(
     Object.keys(request.questions).sort(),
-    ["check_target", "click_target", "operation", "scroll_target", "type_text_target", "uncheck_target"],
+    [
+      "check_target",
+      "click_target",
+      "destructive",
+      "operation",
+      "scroll_target",
+      "type_text_target",
+      "uncheck_target",
+    ],
     "one target head per offered operation, asked in the same request as the operation",
   );
+  assert.equal(request.questions.destructive.type, "noul", "how hard the step is to undo is asked in that same request");
   for (const terminal of ["WAIT", "DONE", "BLOCKED"]) {
     assert.ok(terminal in request.questions.operation.criteria);
     assert.ok(!(`${terminal.toLowerCase()}_target` in request.questions), "a terminal operation has no target head");
@@ -148,6 +157,36 @@ const space = actionSpace(screen());
   const withoutText = actionSpace(screen(), { typable: false });
   assert.ok(!("TYPE_TEXT" in withoutText.targets), "with nothing to type, the operation is not offered at all");
   assert.ok("CLICK" in withoutText.targets, "everything else stays on offer");
+}
+
+{
+  const dense = Array.from({ length: 300 }, (_, i) => ({
+    ref_id: `@${S}:d${i}`,
+    role: "button",
+    name: `Button ${i}`,
+    available_actions: ["Click"],
+  }));
+  const full = actionSpace(dense);
+  assert.equal(full.elements.length, 254, "a choice takes no more options than that");
+  assert.equal(full.truncated, true, "and the run is told that something was left out");
+  assert.match(
+    buildRequest("do it", { app: "X", window: "Y" }, full, []).questions.operation.instructions.rules,
+    /prefer DRILL/,
+    "so it looks inside a region instead of calling the goal impossible",
+  );
+  assert.equal(actionSpace(screen()).truncated, false, "a screen that fits says so");
+}
+
+{
+  const node = { role: "textfield", name: "Card", value: "4111 1111 1111 1111" };
+  assert.match(criterion(node, "1"), /4111/, "a value is described by default, which is how a target is told apart");
+  assert.doesNotMatch(
+    criterion(node, "1", { values: false }),
+    /4111/,
+    "and withheld on request, so a private field never leaves the machine",
+  );
+  const withheld = actionSpace([{ ...node, ref_id: "@s:e1", available_actions: ["SetValue"] }], { values: false });
+  assert.doesNotMatch(withheld.elements.join(" "), /4111/);
 }
 
 console.log("ok");

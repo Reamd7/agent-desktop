@@ -58,13 +58,33 @@ does the value go through the clipboard and a paste. The clipboard is put back
 when the run ends. One key press per character is never used: it drops
 characters and loses capitals.
 
+**What leaves the machine.** Every turn posts a description of the screen to
+`api.typesafe.ai`: each element's role, its accessible name or description, up
+to sixty characters of the value it holds, its state, the window title, and the
+recent actions. That is enough to send the contents of a private document or a
+filled form. Secure text fields are already withheld by agent-desktop and never
+reach the request. Pass `--no-values` to withhold what every other field holds
+as well; targeting gets harder, because a value is often the only thing that
+tells two unnamed rows apart. Decide this before pointing a run at something
+confidential.
+
+**A step that is hard to undo is not taken quietly.** The same request asks how
+hard the step would be to reverse. An ordinary step needs 0.70 confidence in its
+target, one rated destructive needs 0.90, and below 0.55 nothing runs. When the
+bar is not met the run stops and names the candidate it would have acted on, so
+you decide instead of it.
+
 **`--cursor` makes the run watchable.** It starts a session, shows a cursor that
 travels to each element before the operation lands, and turns it off at the end.
 The cursor is drawn where the element is, so bring the application in front of
 your terminal or it arrives behind it.
 
-It stops on `DONE`, on `BLOCKED`, after 40 actions, after 80 model calls, or
-after three turns that changed nothing.
+It stops on `DONE`, on `BLOCKED`, on a confidence too low for the risk, after 40
+actions, after 80 model calls, or after three turns that changed nothing.
+
+A screen with more actionable elements than a choice can carry says so, in the
+request and in the turn it reports, and the policy is told to look inside a
+region rather than call the goal impossible.
 
 `--root @ref` starts inside a region when you already know which one.
 

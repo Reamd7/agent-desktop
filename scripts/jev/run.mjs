@@ -10,13 +10,14 @@
  */
 import { fileURLToPath } from "node:url";
 
-import { describe } from "./act.mjs";
-import { cli, execute, observe, startCursor, stopCursor } from "./desktop.mjs";
+import { describe } from "./screen.mjs";
+import { clipboardGuard, execute, observe, startCursor, stopCursor } from "./desktop.mjs";
 import {
   actionSpace,
   buildRequest,
   criterion,
   fingerprint,
+  route,
   shouldStop,
   textSupply,
   validateChoice,
@@ -46,23 +47,28 @@ const post = async (url, key, body) => {
   throw new Error("the model stayed unavailable");
 };
 
-export const run = async function* (goal, app, { root = null, text = null, cursor = false } = {}) {
+export const run = async function* (
+  goal,
+  app,
+  { root = null, text = null, cursor = false, values = true } = {},
+) {
   if (!process.env.TYPESAFE_API_KEY) throw new Error("TYPESAFE_API_KEY unset");
   const supply = textSupply(text);
   const session = cursor ? startCursor(goal) : null;
-  const clipboard = cli("clipboard-get");
+  const clipboard = clipboardGuard();
   const state = { steps: 0, calls: 0, history: [], operation: null, root };
   try {
     for (;;) {
       const { nodes, screen } = observe(app, state.root);
       const before = fingerprint(nodes);
-      const space = actionSpace(nodes, { drillable: !state.root, typable: supply.available() });
+      const space = actionSpace(nodes, { drillable: !state.root, typable: supply.available(), values });
       if (!space.elements.length) {
         yield { stop: "nothing on this screen can be acted on", screen };
         return;
       }
-      const answers = (await post(API, process.env.TYPESAFE_API_KEY, buildRequest(goal, screen, space, state.history)))
-        .answers;
+      const answers = (
+        await post(API, process.env.TYPESAFE_API_KEY, buildRequest(goal, screen, space, state.history, { values }))
+      ).answers;
       state.calls += 1;
       const options = [
         ...Object.keys(space.targets),
@@ -90,6 +96,21 @@ export const run = async function* (goal, app, { root = null, text = null, curso
         );
         node = space.targets[state.operation][head.choice];
         confidence = head.confidence;
+        const settled = route({
+          target: head.choice,
+          targetConfidence: confidence,
+          present: null,
+          destructive: answers.destructive?.noul ?? null,
+        });
+        if (settled.decision !== "act") {
+          yield {
+            stop: `${settled.decision}: ${settled.why}`,
+            screen,
+            candidate: { operation: state.operation, target: criterion(node, head.choice), confidence },
+            history: state.history,
+          };
+          return;
+        }
       }
       let value = null;
       if (state.operation === "TYPE_TEXT") {
@@ -99,7 +120,7 @@ export const run = async function* (goal, app, { root = null, text = null, curso
           return;
         }
       }
-      const outcome = execute(app, state.operation, node, value);
+      const outcome = execute(app, state.operation, node, value, clipboard);
       state.steps += 1;
       const turn = {
         step: state.steps,
@@ -111,6 +132,7 @@ export const run = async function* (goal, app, { root = null, text = null, curso
         ok: outcome.ok,
         delivery: outcome.delivery,
         route: outcome.route ?? null,
+        truncated: space.truncated,
         changed: null,
       };
       state.history.push(turn);
@@ -124,8 +146,7 @@ export const run = async function* (goal, app, { root = null, text = null, curso
       }
     }
   } finally {
-    const previous = clipboard.data?.text;
-    if (typeof previous === "string") cli("clipboard-set", previous);
+    clipboard.restore();
     if (session) stopCursor();
   }
 };
@@ -139,14 +160,17 @@ const main = async (argv) => {
   const root = flag("root");
   const text = argv.flatMap((a, i) => (argv[i - 1] === "--text" ? [a] : []));
   const cursor = argv.includes("--cursor");
+  const values = !argv.includes("--no-values");
   const goal = argv
-    .filter((a, i) => !a.startsWith("--") && !(argv[i - 1]?.startsWith("--") && argv[i - 1] !== "--cursor"))
+    .filter((a, i) => !a.startsWith("--") && !(argv[i - 1]?.startsWith("--") && argv[i - 1] !== "--cursor" && argv[i - 1] !== "--no-values"))
     .join(" ");
   if (!app || !goal) {
-    console.error('usage: run.mjs --app <name> [--cursor] [--root @ref] [--text "value"]... "<goal>"');
+    console.error(
+      'usage: run.mjs --app <name> [--cursor] [--no-values] [--root @ref] [--text "value"]... "<goal>"',
+    );
     process.exit(2);
   }
-  for await (const event of run(goal, app, { root, text, cursor })) console.log(JSON.stringify(event));
+  for await (const event of run(goal, app, { root, text, cursor, values })) console.log(JSON.stringify(event));
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
