@@ -359,3 +359,28 @@ it was failing before this work for a reason the original report never saw.
   an accepted selection write.
 - The three `#[ignore]` Finder probes were run: two passed, and the third
   failed for the environmental reason recorded as B9.
+
+### Verification after the launch and resolution fixes landed
+
+| Case | Before | After |
+|------|--------|-------|
+| Fresh `launch com.apple.Numbers`, run twice | `APP_UNRESPONSIVE`, `surface_array_incomplete` | `ok` with the window, 4.0 s and 1.7 s |
+| Fresh `launch --activate` | `APP_UNRESPONSIVE` | `ok` with the window, 2.0 s |
+| `launch` attaching to a running instance | `APP_UNRESPONSIVE` | `ok` with the window |
+| Resolve a cell ref after the cell's name changed | `AMBIGUOUS_TARGET`, 38 candidates, "retry with a more specific ref" | `STALE_REF`, `kind: "bounds_mismatch"`, 39 candidates, refresh-and-retry recovery |
+| The three `#[ignore]` Finder probes | 2 passed, 1 failed on B9 | all 3 passed once Finder had a resolvable window |
+
+A launch that succeeds can still return a window with zero bounds and
+`visible: false`, because the window exists before it is laid out. That is an
+honest report rather than an error, but a caller that snapshots immediately may
+observe an empty tree and should wait for bounds.
+
+Two observations about the machine during this work, neither a product defect:
+
+- Under a load average near 10, `find` returned `TIMEOUT` with
+  `locator_transient_incomplete` on two attempts out of three, while a
+  `snapshot` of the same window succeeded. The deadline is doing its job; the
+  asymmetry between `find` and `snapshot` under load is worth a look.
+- The disk filled to under 200 MB free during parallel builds, and two test
+  runs failed with `No space left on device` in `trace_read::html`. Those
+  failures were environmental.
