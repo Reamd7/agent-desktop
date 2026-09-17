@@ -107,7 +107,9 @@ pub(crate) fn read_node(
         &identifiers,
         &actions,
     );
-    let budget = child_plan.max_elements(wrapper_candidate);
+    let wants_child_label = (requirements.name || requirements.description)
+        && crate::tree::child_labels::should_read_child_label(&role, &attrs.name_evidence);
+    let budget = child_plan.max_elements(wrapper_candidate, wants_child_label);
     let child_read = crate::tree::query::child_read::read_children(
         element,
         attrs.role.as_deref(),

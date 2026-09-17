@@ -23,7 +23,10 @@ pub(crate) fn complete_name_evidence_with_deadline(
     Ok((evidence, complete))
 }
 
-fn should_read_child_label(role: &str, evidence: &agent_desktop_core::NameEvidence) -> bool {
+pub(crate) fn should_read_child_label(
+    role: &str,
+    evidence: &agent_desktop_core::NameEvidence,
+) -> bool {
     names_from_child_content(role) && !has_name_without_child_content(evidence)
 }
 
