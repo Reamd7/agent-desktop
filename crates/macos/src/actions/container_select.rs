@@ -19,23 +19,74 @@ mod imp {
     use super::SELECTED;
 
     /// `AXOutline` and `AXTable` make `AXSelectedRows` writable; `AXList` and
-    /// `AXBrowser` columns make `AXSelectedChildren` writable. Most elements
-    /// publish both names and accept writes to only one.
-    const SELECTION_ATTRIBUTES: [&str; 2] = ["AXSelectedRows", "AXSelectedChildren"];
+    /// `AXBrowser` columns make `AXSelectedChildren` writable; a spreadsheet
+    /// grid owns its cell selection through `AXSelectedCells` and refuses the
+    /// other two. Most elements publish several of these names and accept
+    /// writes to only one, so each write is verified by readback.
+    const SELECTION_ATTRIBUTES: [&str; 3] =
+        ["AXSelectedRows", "AXSelectedChildren", "AXSelectedCells"];
     const MAX_ANCESTOR_WALK: usize = 6;
     const MAX_SELECTION_READBACK: usize = 64;
 
-    /// Climbs from the target because the clickable label is usually a
-    /// descendant of the selectable row. Every write is verified by readback.
+    /// Reading the subrole would add nothing: no subrole moves an element into
+    /// or out of this set, because the ones that redefine a native role keep a
+    /// row a row and a cell a cell.
+    pub(crate) fn element_activates_by_selection(element: &AXElement, deadline: Deadline) -> bool {
+        crate::tree::attributes::copy_string_attr_result(element, "AXRole", deadline)
+            .ok()
+            .flatten()
+            .is_some_and(|role| {
+                super::role_activates_by_selection(crate::tree::roles::ax_role_and_subrole_to_str(
+                    &role, None,
+                ))
+            })
+    }
+
+    /// Every write is verified by readback. Which element to select depends on
+    /// what the target is: a label is a stand-in for the row around it, while a
+    /// row or a cell is the selectable thing itself.
     pub(crate) fn select_within_container(
+        element: &AXElement,
+        deadline: Deadline,
+    ) -> Result<DeliveryOutcome, AdapterError> {
+        if select_member_directly(element, deadline)? {
+            return Ok(DeliveryOutcome::DeliveredVerified);
+        }
+        if element_activates_by_selection(element, deadline) {
+            return select_in_ancestor_containers(element, deadline);
+        }
+        climb_to_selectable_ancestor(element, deadline)
+    }
+
+    /// The target is selectable, so the search is for the container that owns
+    /// its selection, never for a larger element to select instead. A
+    /// spreadsheet keeps cell selection on the table two levels above the cell;
+    /// selecting the row in between would answer a question nobody asked.
+    fn select_in_ancestor_containers(
+        element: &AXElement,
+        deadline: Deadline,
+    ) -> Result<DeliveryOutcome, AdapterError> {
+        let mut container = element.clone();
+        for _ in 0..MAX_ANCESTOR_WALK {
+            let Some(parent) = parent_of(&container, deadline) else {
+                return Ok(DeliveryOutcome::NotDelivered);
+            };
+            if select_member_in_container(&parent, element, deadline)? {
+                return Ok(DeliveryOutcome::DeliveredVerified);
+            }
+            container = parent;
+        }
+        Ok(DeliveryOutcome::NotDelivered)
+    }
+
+    /// Climbs from the target because the clickable label is usually a
+    /// descendant of the selectable row.
+    fn climb_to_selectable_ancestor(
         element: &AXElement,
         deadline: Deadline,
     ) -> Result<DeliveryOutcome, AdapterError> {
         let mut member = element.clone();
         for _ in 0..MAX_ANCESTOR_WALK {
-            if select_member_directly(&member, deadline)? {
-                return Ok(DeliveryOutcome::DeliveredVerified);
-            }
             let Some(parent) = parent_of(&member, deadline) else {
                 return Ok(DeliveryOutcome::NotDelivered);
             };
@@ -43,6 +94,9 @@ mod imp {
                 return Ok(DeliveryOutcome::DeliveredVerified);
             }
             member = parent;
+            if select_member_directly(&member, deadline)? {
+                return Ok(DeliveryOutcome::DeliveredVerified);
+            }
         }
         Ok(DeliveryOutcome::NotDelivered)
     }
@@ -140,6 +194,28 @@ mod imp {
     ) -> Result<DeliveryOutcome, AdapterError> {
         Ok(DeliveryOutcome::NotDelivered)
     }
+
+    pub(crate) fn element_activates_by_selection(
+        _element: &AXElement,
+        _deadline: Deadline,
+    ) -> bool {
+        false
+    }
 }
 
-pub(crate) use imp::select_within_container;
+pub(crate) use imp::{element_activates_by_selection, select_within_container};
+
+#[cfg(test)]
+mod tests {
+    use super::role_activates_by_selection;
+
+    #[test]
+    fn a_spreadsheet_cell_is_a_selection_target_in_its_own_right() {
+        for role in ["cell", "row", "treeitem", "option", "tab", "listitem"] {
+            assert!(role_activates_by_selection(role));
+        }
+        for role in ["button", "textfield", "checkbox", "group", "table"] {
+            assert!(!role_activates_by_selection(role));
+        }
+    }
+}
