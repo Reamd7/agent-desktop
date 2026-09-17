@@ -384,3 +384,42 @@ Two observations about the machine during this work, neither a product defect:
 - The disk filled to under 200 MB free during parallel builds, and two test
   runs failed with `No space left on device` in `trace_read::html`. Those
   failures were environmental.
+
+### Naming verification, and the one performance cost
+
+Skeleton mode was the whole point of B4 and B5, and it now names its drill
+targets on both applications tested.
+
+| Skeleton snapshot | Before | After |
+|-------------------|--------|-------|
+| Numbers Open panel | 24 `treeitem` refs, 0 named | 24 refs, 24 named |
+| Finder sidebar | unnamed | 25 refs, 25 named |
+| Numbers template chooser | 9 `row` refs, 0 named | 9 refs, 9 named, "All Templates" through "Education" |
+
+`find --name "Basic"` with no role filter used to return the `AXCell`, which
+advertises no action and failed the actionability gate with `POLICY_DENIED`.
+It now returns the `row`, and clicking that ref reports `delivered_verified`
+in 109 ms with the selection confirmed.
+
+The cost is real and was measured. `scripts/perf-baseline-compare.sh
+--skip-fixture --apps "Finder,Numbers" --rounds 8` against the merge base gave,
+on Finder, with an identical node and ref count on both sides:
+
+| Case | Base p50 | HEAD p50 |
+|------|----------|----------|
+| `snapshot skeleton` | 259 ms | 379 ms |
+| `snapshot -i` | 3069 ms | 3079 ms |
+| `snapshot d30` | 3076 ms | 3067 ms |
+
+Only skeleton mode moved, by 46 percent, which is the boundary label read. Most
+of it was waste: a scroll area, a toolbar or a group at the depth cutoff was
+loading children no label would ever be read from, and so was a row that
+already had its own title. A later commit gates the load on the role, and
+naming was re-verified as unchanged at 24 of 24. The re-measurement of the
+gated version is still outstanding: the machine went to a load average above 40
+under a Time Machine backup and a disk purge, which makes any timing
+meaningless.
+
+The Numbers side of that run is not usable. Its success rate was between
+0.125 and 0.375 because the application was timing out under load, so only the
+Finder column supports a conclusion.
