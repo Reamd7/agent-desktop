@@ -27,6 +27,8 @@ mod imp {
         ["AXSelectedRows", "AXSelectedChildren", "AXSelectedCells"];
     const MAX_ANCESTOR_WALK: usize = 6;
     const MAX_SELECTION_READBACK: usize = 64;
+    const SELECTION_SETTLE_MS: u64 = 300;
+    const SELECTION_POLL_MS: u64 = 25;
 
     /// Reading the subrole would add nothing: no subrole moves an element into
     /// or out of this set, because the ones that redefine a native role keep a
@@ -159,7 +161,35 @@ mod imp {
             .flatten()
     }
 
+    /// A selection write is applied asynchronously. The application answers the
+    /// write at once and updates the attribute a moment later, so a single read
+    /// reports failure for a selection the user can already see, and the chain
+    /// then goes on writing selections that have nothing left to fix. The wait
+    /// is bounded, and it only runs after a write the application accepted.
     fn holds_selection(
+        container: &AXElement,
+        member: &AXElement,
+        attribute: &str,
+        deadline: Deadline,
+    ) -> bool {
+        let settle_end =
+            std::time::Instant::now() + std::time::Duration::from_millis(SELECTION_SETTLE_MS);
+        loop {
+            if selection_contains(container, member, attribute, deadline) {
+                return true;
+            }
+            if deadline.is_expired() || std::time::Instant::now() >= settle_end {
+                return false;
+            }
+            std::thread::sleep(
+                deadline
+                    .remaining()
+                    .min(std::time::Duration::from_millis(SELECTION_POLL_MS)),
+            );
+        }
+    }
+
+    fn selection_contains(
         container: &AXElement,
         member: &AXElement,
         attribute: &str,

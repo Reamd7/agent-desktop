@@ -8,9 +8,15 @@ mod imp {
     const SETTLE_BUDGET_MS: u64 = 400;
 
     /// The readback for `perform`, which has no written attribute to re-read.
+    /// Focus alone misses a whole family of controls: a sidebar row answers an
+    /// unsupported code to the action that navigates it, and moves its
+    /// selection rather than the focus. Selection is therefore read as well,
+    /// on every element, because an attribute an element does not publish reads
+    /// as absent and the rule simply never fires for it.
     #[derive(Default)]
     pub(crate) struct FocusState {
         focused_element: Option<AXElement>,
+        selected: Option<bool>,
     }
 
     /// Accessibility hands back a fresh reference for the same element on every
@@ -37,6 +43,13 @@ mod imp {
                 deadline,
             )
             .ok()?,
+            selected: crate::tree::attributes::copy_bool_attr_result(
+                element,
+                crate::actions::container_select::SELECTED,
+                deadline,
+            )
+            .ok()
+            .flatten(),
         })
     }
 
@@ -80,24 +93,75 @@ mod imp {
         after: &Option<FocusState>,
         target_focused: bool,
     ) -> bool {
-        target_focused && matches!((before, after), (Some(before), Some(after)) if before != after)
+        let focus_moved_to_target = target_focused
+            && matches!((before, after), (Some(before), Some(after)) if before != after);
+        focus_moved_to_target || selection_turned_on(before, after)
+    }
+
+    /// An element that was not selected and now is has been acted on, whatever
+    /// return code the application chose. The reverse is not evidence: a
+    /// selection that was already true says nothing about this action.
+    fn selection_turned_on(before: &Option<FocusState>, after: &Option<FocusState>) -> bool {
+        matches!(
+            (
+                before.as_ref().and_then(|state| state.selected),
+                after.as_ref().and_then(|state| state.selected),
+            ),
+            (Some(false), Some(true))
+        )
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
 
+        fn focused(pid: i32) -> Option<FocusState> {
+            Some(FocusState {
+                focused_element: Some(crate::tree::element_for_pid(pid)),
+                selected: None,
+            })
+        }
+
+        fn selected(value: Option<bool>) -> Option<FocusState> {
+            Some(FocusState {
+                focused_element: None,
+                selected: value,
+            })
+        }
+
         #[test]
         fn focus_changes_must_correlate_with_the_target() {
-            let before = Some(FocusState {
-                focused_element: Some(crate::tree::element_for_pid(1)),
-            });
-            let after = Some(FocusState {
-                focused_element: Some(crate::tree::element_for_pid(2)),
-            });
+            let before = focused(1);
+            let after = focused(2);
             assert!(!observed_change(&before, &after, false));
             assert!(observed_change(&before, &after, true));
             assert!(!observed_change(&after, &after, true));
+        }
+
+        #[test]
+        fn a_selection_that_turned_on_is_an_effect_without_any_focus_move() {
+            assert!(observed_change(
+                &selected(Some(false)),
+                &selected(Some(true)),
+                false
+            ));
+        }
+
+        #[test]
+        fn an_unchanged_or_unreadable_selection_proves_nothing() {
+            for (before, after) in [
+                (Some(true), Some(true)),
+                (Some(false), Some(false)),
+                (Some(true), Some(false)),
+                (None, Some(true)),
+                (Some(false), None),
+                (None, None),
+            ] {
+                assert!(
+                    !observed_change(&selected(before), &selected(after), false),
+                    "before={before:?} after={after:?} must not count as an effect"
+                );
+            }
         }
 
         #[test]
