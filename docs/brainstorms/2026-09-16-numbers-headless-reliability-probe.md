@@ -294,3 +294,68 @@ Risk: low; only the error code and message change.
    new ignored Numbers probe.
 3. B4 and B5 (naming): golden fixtures change; do them together.
 4. B6 and B7: additive.
+
+## Addendum, 2026-09-16: fixes applied and cross-app verification
+
+Everything below was measured after the probe, while fixing. The desktop was
+never made exclusive: every command ran headless with another application
+frontmost, except two deliberate `focus-window` calls that are called out.
+
+### A4. Numbers builds its sheet canvas only once the window has been key
+
+A document created headlessly is visible on screen with its table drawn, and
+absent from the accessibility tree: the canvas `AXScrollArea` reports only its
+two scroll bars, with no `AXLayoutArea` and no `AXTable`. One `focus-window`
+call makes the layout area and the table appear, and they remain after focus
+moves to another application. So one activation per document unlocks headless
+observation for the rest of that document's life, and without it no reader can
+see the sheet at all. This is a Numbers behaviour; agent-desktop reports the
+tree it is given.
+
+### B9. A snapshot fails when an application has several unfocused windows
+
+`snapshot --app Finder` returns `AMBIGUOUS_TARGET` when Finder has two windows
+and neither is focused, and succeeds with `--window-id`. This broke the repo's
+own `snapshot_resolves_a_window_id_reported_by_list_windows` probe during this
+work. The accessibility API exposes `AXMainWindow` for exactly this case, and
+preferring it would resolve the common one. Not fixed here; the probe's failure
+is environmental, and no snapshot code was changed.
+
+### What was fixed, and why each fix is not about Numbers
+
+Every rule below keys on a standard accessibility attribute or on the role
+vocabulary that already lived in `agent-desktop-core`. The diff contains no
+application name, bundle identifier, or vendor-specific action string.
+
+| Fix | Rule | Evidence it is general |
+|-----|------|------------------------|
+| B2, mutation timeout | A read gets a 250 ms slice because it is one step of a loop that re-checks its deadline; a mutation has no such loop and gets half the remaining deadline | Pure timing policy, applies to every `AXUIElementPerformAction` and `AXUIElementSetAttributeValue` on any application |
+| B3, press verified by selection | For a role that activates by selection, a press that leaves `AXSelected` false is a delivery with no effect, and only that outcome lets the chain continue | Uses the pre-existing core role set (row, treeitem, cell, listitem, option, tab) and the standard `AXSelected` |
+| B3, cell selection | `AXSelectedCells` added to the container selection attributes | Standard `NSAccessibility` table attribute, published by any `NSTableView` grid |
+| B3, selection target | When the target is selectable in its own right, find the container that owns its selection instead of climbing to a larger element and selecting that | Role-based; prevents selecting a whole row when a cell was asked for |
+| Settability probe | An unanswerable settability read means "do not attempt this write", not "fail the command" | Reuses `ax_absence::is_absent_attribute_error`, whose own comment warns against a second definition |
+| Effect probe | A selection that turned on is evidence of an effect, on any element, alongside the existing focus rule | Fixes Finder, which was never part of the original report |
+| Selection readback | A selection write is applied asynchronously, so the readback waits, bounded, and only after an accepted write | Matches three existing bounded polls in the same crate |
+
+### Measured results
+
+| Case | Before | After |
+|------|--------|-------|
+| Numbers, click "Create" | `APP_UNRESPONSIVE`, `kAXErrorCannotComplete`, unsafe to retry, while the document it created was on screen | `ok`, `AXPress succeeded`, 1949 ms in the lease |
+| Numbers, click an empty sheet cell | `ok`, `delivered_unverified`, nothing selected | `delivered_verified`, `verified: true`, 82 to 148 ms, selection confirmed by an independent raw read |
+| Finder, click a sidebar row | `ACTION_FAILED`, "AXOpen did not establish a verifiable effect", `delivery_uncertain` — while the click had in fact worked | `delivered_verified` through `activate_descendant`, selection confirmed and restored |
+| Numbers, click "New Document" | `AXPress succeeded`, unverified | unchanged, which is the point: a plain button keeps today's behaviour |
+
+Finder matters here because it is a different application, a different widget
+family (`AXOutline` and `AXOutlineRow` rather than `AXTable` and `AXCell`), and
+it was failing before this work for a reason the original report never saw.
+
+### Still ungated
+
+- `bash tests/e2e/run.sh` needs `AGENT_DESKTOP_E2E_EXCLUSIVE=1`, which its own
+  README says must not be set while the desktop is in use. It has not been run.
+- `bash scripts/perf-baseline-compare.sh` has not been run. The changes add at
+  most two accessibility reads per performed action and one bounded wait after
+  an accepted selection write.
+- The three `#[ignore]` Finder probes were run: two passed, and the third
+  failed for the environmental reason recorded as B9.
