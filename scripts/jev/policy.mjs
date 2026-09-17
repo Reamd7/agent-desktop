@@ -25,7 +25,7 @@ const STALLED_TURNS = 3;
  */
 export const OPS = {
   CLICK: { needs: "Click", what: "Press a button, row, link, menu item or tab." },
-  TYPE_TEXT: { needs: "SetValue", text: true, what: "Put text into an editable field. A separate model supplies the value." },
+  TYPE_TEXT: { needs: "SetValue", text: true, what: "Put the caller's next supplied value into an editable field." },
   CHECK: { needs: "Toggle", what: "Put a checkbox or switch into its on state, whatever it holds now." },
   UNCHECK: { needs: "Toggle", what: "Put a checkbox or switch into its off state, whatever it holds now." },
   EXPAND: { needs: "Expand", what: "Open a disclosure, tree item or menu button." },
@@ -79,13 +79,27 @@ export const criterion = (node, index) => {
   return parts.join(" · ");
 };
 
-export const actionSpace = (nodes, { drillable = true } = {}) => {
+/**
+ * Text is the caller's to supply: a list consumed in order, or a function asked
+ * for each field. Nothing here writes a value, so a run never puts a string on
+ * screen that its caller did not choose.
+ */
+export const textSupply = (option) => {
+  if (typeof option === "function") {
+    return { available: () => true, take: (field, history) => option(field, history) };
+  }
+  const queue = option == null ? [] : Array.isArray(option) ? [...option] : [option];
+  return { available: () => queue.length > 0, take: async () => queue.shift() ?? null };
+};
+
+export const actionSpace = (nodes, { drillable = true, typable = true } = {}) => {
   const elements = [];
   const targets = {};
   for (const node of nodes) {
     const advertised = node.available_actions ?? [];
     const operations = Object.entries(OPS)
       .filter(([, op]) => advertised.includes(op.needs))
+      .filter(([name]) => typable || name !== "TYPE_TEXT")
       .map(([name]) => name);
     if (drillable && node.children_count) operations.push("DRILL");
     if (!operations.length) continue;

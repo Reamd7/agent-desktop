@@ -30,6 +30,23 @@ export const cli = (...argv) => {
 };
 
 /**
+ * A cursor makes the run watchable: it travels to each element before the
+ * operation lands. It is drawn where the element is, so the application has to
+ * be in front of whatever else is on screen or the cursor arrives behind it.
+ * Turning it on also starts the session that carries the trace.
+ */
+export const startCursor = (label) => {
+  const session = cli("session", "start", "--name", "jev-desktop", "--cursor", "--multi-agent");
+  if (!session.ok) return null;
+  process.env.AGENT_DESKTOP_SESSION = session.data.session_id;
+  process.env.AGENT_DESKTOP_AGENT_ID ??= "jev-desktop";
+  cli("cursor-overlay", "enable", "--label", label.slice(0, 60));
+  return session.data.session_id;
+};
+
+export const stopCursor = () => cli("cursor-overlay", "disable");
+
+/**
  * A window is read shallowly until the policy asks to go deeper, so a document
  * holding thousands of elements costs the same first look as a panel holding
  * thirty. A region cut off by that shallow read still reports how much it holds,

@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { collect, offerable } from "./act.mjs";
-import { ARGV, OPS, actionSpace, buildRequest, criterion, fingerprint, shouldStop, validateChoice } from "./policy.mjs";
+import {
+  ARGV,
+  OPS,
+  actionSpace,
+  buildRequest,
+  criterion,
+  fingerprint,
+  shouldStop,
+  textSupply,
+  validateChoice,
+} from "./policy.mjs";
 
 const S = "s8f3k2p9";
 const screen = (extra = []) =>
@@ -108,6 +118,36 @@ const space = actionSpace(screen());
   assert.match(shouldStop({ steps: 40, calls: 1, operation: "CLICK", history: [] }), /action budget/);
   assert.match(shouldStop({ steps: 1, calls: 80, operation: "CLICK", history: [] }), /model call budget/);
   assert.equal(shouldStop({ steps: 1, calls: 1, operation: "CLICK", history: [] }), null);
+}
+
+{
+  const list = textSupply(["first", "second"]);
+  assert.equal(list.available(), true);
+  assert.equal(await list.take(), "first");
+  assert.equal(await list.take(), "second");
+  assert.equal(list.available(), false, "an exhausted list stops offering to type");
+  assert.equal(await list.take(), null, "and never invents one more value");
+
+  const one = textSupply("only");
+  assert.equal(await one.take(), "only");
+  assert.equal(one.available(), false);
+
+  const asked = [];
+  const fn = textSupply((field) => {
+    asked.push(field.what);
+    return "from the caller";
+  });
+  assert.equal(fn.available(), true, "a caller that answers per field is never exhausted");
+  assert.equal(await fn.take({ what: 'textfield "Name"' }), "from the caller");
+  assert.deepEqual(asked, ['textfield "Name"'], "the field is described to the caller before it answers");
+
+  assert.equal(textSupply(null).available(), false, "no supply means typing is never offered");
+}
+
+{
+  const withoutText = actionSpace(screen(), { typable: false });
+  assert.ok(!("TYPE_TEXT" in withoutText.targets), "with nothing to type, the operation is not offered at all");
+  assert.ok("CLICK" in withoutText.targets, "everything else stays on offer");
 }
 
 console.log("ok");

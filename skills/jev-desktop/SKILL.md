@@ -13,6 +13,7 @@ puts the tree in your context.
 
 ```sh
 node scripts/jev/run.mjs --app Finder "open the Applications folder"
+node scripts/jev/run.mjs --app TextEdit --cursor --text "A line to write." "write the supplied sentence into the document"
 ```
 
 Each turn reads the screen, asks for one operation and a target for that
@@ -44,15 +45,26 @@ pins it as the root for later turns. `WIDEN` gives the whole window back.
 already in the wanted state stays there and the policy never reasons about the
 current one.
 
+**You supply the text.** Nothing here writes a value, so a run never puts a
+string on screen that you did not choose. Pass `--text` once per value and they
+are consumed in order, or pass a function as the `text` option and it is asked
+for each field with that field's description. When there is no value left to
+give, `TYPE_TEXT` is not offered at all, so the run stops rather than inventing
+one.
+
 **Text goes in by whichever route the application accepts.** A direct value
 write is one verified call; applications that refuse it say so, and only then
 does the value go through the clipboard and a paste. The clipboard is put back
 when the run ends. One key press per character is never used: it drops
 characters and loses capitals.
 
+**`--cursor` makes the run watchable.** It starts a session, shows a cursor that
+travels to each element before the operation lands, and turns it off at the end.
+The cursor is drawn where the element is, so bring the application in front of
+your terminal or it arrives behind it.
+
 It stops on `DONE`, on `BLOCKED`, after 40 actions, after 80 model calls, or
-after three turns that changed nothing. Typing needs `TEXT_MODEL_API_KEY`; the
-value comes from a writing model, never from the executor.
+after three turns that changed nothing.
 
 `--root @ref` starts inside a region when you already know which one.
 
