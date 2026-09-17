@@ -82,15 +82,22 @@ export const overlayRole = (tree) => {
 };
 
 /**
- * The only elements withheld are ones no command can reach, and cells that
- * merely repeat their treeitem parent. Everything else is offered: the docs
- * are explicit that a Choice does better with the full list than a shortlist,
- * and an unnamed row is still distinguishable by the value it holds.
+ * The only elements withheld are ones no command can reach. Everything else is
+ * offered: the docs are explicit that a Choice does better with the full list
+ * than a shortlist, and an unnamed row is still distinguishable by the value it
+ * holds.
+ *
+ * An element that advertises no action is the one that must go. A sidebar
+ * category in Numbers publishes its label on a cell and its behaviour on the
+ * row around it, and both carry the same name, so the inert cell wins the
+ * choice about half the time and every such win ends in POLICY_DENIED. Nothing
+ * is lost by withholding it: the row beside it is the element that acts.
  */
 export const offerable = (refs) =>
   refs.filter((n) => {
     const s = n.states ?? [];
     if (s.includes("disabled") || s.includes("hidden")) return false;
+    if (!n.available_actions?.length) return false;
     return !(n.role === "cell" && n.parentRole === "treeitem");
   });
 
@@ -341,8 +348,10 @@ const main = async (argv) => {
   const node = byRef.get(answers.target);
   const { verb, corrected } = reconcile(answers.command, node, text !== null);
   const decision = route(answers);
-  const wantsText = TAKES_TEXT.has(verb) || (answers.needsText ?? 0) >= 0.5;
-  const missingText = wantsText && text === null;
+  // Only the verb decides this. The gate is a speculative read of the intent,
+  // and asking a click for text because it scored 0.50 stops an action that
+  // needs no text and never could.
+  const missingText = TAKES_TEXT.has(verb) && text === null;
 
   const out = {
     ok: true,
