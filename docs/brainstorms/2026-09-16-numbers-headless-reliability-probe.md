@@ -50,10 +50,10 @@ could not be tested on the tiles without bringing Numbers to the front.
 Consequence: no accessibility client can find "Blank" by name. The reachable
 headless path is the sidebar (`AXTable` rows, selectable) plus "Create", which
 creates whichever tile Numbers has selected. That selection is not observable
-through AX: in this probe "Create" produced the "Categories" template while
-the screenshot taken just before showed that tile highlighted under
-"Recents", and the sidebar selection had changed on its own twice (see A3),
-so an agent cannot predict which template "Create" will use.
+through AX (`AXSelectedChildren` stays empty while a tile is highlighted), so
+an agent cannot confirm which template "Create" will use. In this probe the
+user had clicked the "Categories" tile by hand, and "Create" produced that
+template.
 
 ### A2. Cells accept no text write; the cell editor accepted writes and changed nothing
 
@@ -91,9 +91,9 @@ for Chromium). Another assistive client is the likely setter. Results on a
 machine without that client may differ in element naming (with the flag on,
 section lists gained `AXDescription` values such as "Basic").
 
-Unexplained: the chooser sidebar changed category twice between read-only
-probes (All Templates → Personal Finance → All Templates). Toggling the flag
-did not reproduce it.
+The chooser sidebar changed category twice between read-only probes; the
+user confirmed those were manual clicks in the Numbers window. Toggling the
+flag does not move the selection.
 
 ## Part B: agent-desktop gaps (app-agnostic)
 
