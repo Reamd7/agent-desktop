@@ -106,12 +106,16 @@ pub(super) fn classify_bounds_matches(
 
 #[cfg(target_os = "macos")]
 fn stale_ref_from_bounds_mismatch(entry: &RefEntry, candidate_count: usize) -> AdapterError {
-    AdapterError::stale_ref("Saved target's bounds no longer match any live candidate")
-        .with_details(serde_json::json!({
-            "kind": "bounds_mismatch",
-            "candidate_count": candidate_count,
-            "identity": identity_summary_for_message(entry),
-        }))
+    let mut error = AdapterError::stale_ref("element");
+    error.message = format!(
+        "No live candidate matched the saved element's bounds: \
+         {candidate_count} shared its identity, none its geometry"
+    );
+    error.with_details(serde_json::json!({
+        "kind": "bounds_mismatch",
+        "candidate_count": candidate_count,
+        "identity": identity_summary_for_message(entry),
+    }))
 }
 
 #[cfg(target_os = "macos")]
