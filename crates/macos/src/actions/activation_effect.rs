@@ -6,6 +6,7 @@ mod imp {
 
     const SETTLE_POLL_MS: u64 = 40;
     const SETTLE_BUDGET_MS: u64 = 400;
+    const FOCUS_DESCENT_WALK: usize = 3;
 
     /// The readback for `perform`, which has no written attribute to re-read.
     /// Focus alone misses a whole family of controls: a sidebar row answers an
@@ -30,6 +31,12 @@ mod imp {
                 (Some(mine), Some(theirs)) => crate::tree::same_element(mine, theirs),
                 _ => false,
             }
+        }
+    }
+
+    impl FocusState {
+        pub(crate) fn focused_element(self) -> Option<AXElement> {
+            self.focused_element
         }
     }
 
@@ -62,8 +69,34 @@ mod imp {
         let target_focused = after
             .as_ref()
             .and_then(|state| state.focused_element.as_ref())
-            .is_some_and(|focused| crate::tree::same_element(focused, element));
+            .is_some_and(|focused| focus_reached(focused, element, deadline));
         observed_change(before, &after, target_focused)
+    }
+
+    /// A control that owns an editor hands focus to the editor, not to itself:
+    /// a PDF form field in Preview publishes a text area and focus lands there.
+    /// Demanding an exact match called that a failure and reported an action
+    /// that had plainly worked as one whose outcome was unknown.
+    pub(crate) fn focus_reached(
+        focused: &AXElement,
+        element: &AXElement,
+        deadline: Deadline,
+    ) -> bool {
+        let mut current = focused.clone();
+        for _ in 0..FOCUS_DESCENT_WALK {
+            if crate::tree::same_element(&current, element) {
+                return true;
+            }
+            let Some(parent) =
+                crate::tree::attributes::copy_element_attr_result(&current, "AXParent", deadline)
+                    .ok()
+                    .flatten()
+            else {
+                return false;
+            };
+            current = parent;
+        }
+        false
     }
 
     pub(crate) fn settled_change(
@@ -208,4 +241,6 @@ mod imp {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) use imp::focus_reached;
 pub(crate) use imp::{changed_now, focus_state, settled_change};

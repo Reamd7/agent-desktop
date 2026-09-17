@@ -109,6 +109,13 @@ export const describe = (node, rich) => {
   };
   if (node.value != null && node.value !== "") d.holds = String(node.value).slice(0, 120);
   if (node.states?.length) d.state = node.states.join(", ");
+  // A PDF form field carries no name, no description and no help text, so
+  // position is the only thing that tells one from the next. Reading order and
+  // "the box on the left" are answerable from it; nothing else on such a
+  // screen is.
+  if (!d.what.includes('"') && node.bounds) {
+    d.at = `x ${Math.round(node.bounds.x)}, y ${Math.round(node.bounds.y)}`;
+  }
   if (rich) {
     if (node.available_actions?.length) d.supports = node.available_actions.join(", ");
     if (node.children_count) d.contains = `${node.children_count} items not shown`;
@@ -301,13 +308,13 @@ const main = async (argv) => {
   }
   if (!process.env.TYPESAFE_API_KEY) fail("TYPESAFE_API_KEY unset");
 
-  const base = ["snapshot", "--app", app, "-i", "--compact"];
+  const base = ["snapshot", "--app", app, "-i", "--compact", "--include-bounds"];
   let snap = run(bin, root ? [...base, "--root", root] : base);
   if (!snap.ok) fail(`snapshot failed: ${snap.error?.code}`, { detail: snap.error?.message });
 
   const overlay = overlayRole(snap.data.tree);
   if (overlay && !root) {
-    const surfaceSnap = run(bin, ["snapshot", "--app", app, "--surface", overlay, "-i", "--compact"]);
+    const surfaceSnap = run(bin, ["snapshot", "--app", app, "--surface", overlay, "-i", "--compact", "--include-bounds"]);
     if (surfaceSnap.ok) snap = surfaceSnap;
   }
 
