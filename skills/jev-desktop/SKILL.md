@@ -1,9 +1,62 @@
 ---
 name: jev-desktop
-description: Resolve one plain-language intent against the live screen and get back the agent-desktop command that carries it out, without ever reading the accessibility tree. Use when driving a desktop app step by step and you want to keep a 150-element JSON tree out of your context — you hold the goal and the memory, the script and TypeSafe's Jev model hold the screen. Covers which element, which command, and whether it is safe to act.
+description: Drive a desktop application from one plain-language goal, or resolve one intent at a time, without ever reading the accessibility tree. Use when automating a desktop app and you want to keep a 150-element JSON tree out of your context. Hand `run.mjs` a whole goal and it observes, decides and acts until the goal is met; hand `act.mjs` a single step when you want to keep the plan yourself. Covers which element, which operation, when to look deeper, and when to stop.
 ---
 
 # jev-desktop
+
+Two entry points over the same screen reading. `run.mjs` takes a goal and drives
+until it is met. `act.mjs` takes one step and hands the plan back to you. Neither
+puts the tree in your context.
+
+## The loop
+
+```sh
+node scripts/jev/run.mjs --app Finder "open the Applications folder"
+```
+
+Each turn reads the screen, asks for one operation and a target for that
+operation in the same request, carries it out, and reads again. It prints one
+JSON line per turn and one when it stops.
+
+```json
+{"turn":{"step":1,"operation":"CLICK","target":"treeitem \"Applications\"",
+         "confidence":1,"ok":true,"delivery":"delivered_verified","changed":true}}
+{"stop":"done","confidence":0.96}
+```
+
+The operations are `CLICK`, `TYPE_TEXT`, `CHECK`, `UNCHECK`, `EXPAND`,
+`COLLAPSE`, `SCROLL`, `DRILL`, `WIDEN`, `WAIT`, `DONE` and `BLOCKED`. Only the
+ones something on screen can receive are offered.
+
+**The target is asked once per operation.** `click_target` is chosen from the
+elements that advertise `Click`, `type_text_target` from those that advertise
+`SetValue`, and so on. Only the head matching the chosen operation is read, so a
+target can never be incompatible with the verb that acts on it. That is the
+whole reason the loop does not need to correct itself afterwards.
+
+**Looking is an operation.** A window is read with `--skeleton` first, so a
+document holding four thousand elements costs the same first look as a panel
+holding thirty. A region that was cut off reports how much it holds, and `DRILL`
+pins it as the root for later turns. `WIDEN` gives the whole window back.
+
+**`CHECK` and `UNCHECK` instead of a toggle.** Both are idempotent, so a box
+already in the wanted state stays there and the policy never reasons about the
+current one.
+
+**Text goes in by whichever route the application accepts.** A direct value
+write is one verified call; applications that refuse it say so, and only then
+does the value go through the clipboard and a paste. The clipboard is put back
+when the run ends. One key press per character is never used: it drops
+characters and loses capitals.
+
+It stops on `DONE`, on `BLOCKED`, after 40 actions, after 80 model calls, or
+after three turns that changed nothing. Typing needs `TEXT_MODEL_API_KEY`; the
+value comes from a writing model, never from the executor.
+
+`--root @ref` starts inside a region when you already know which one.
+
+## One step at a time
 
 You keep the goal, the plan and the memory. You send one sentence. You get back
 one small object. The tree never enters your context.
@@ -101,8 +154,18 @@ A screen with more than 254 elements says so in `notes`; use `--root @ref`.
   `crates/core/src/commands/input_hold_policy.rs`.
 - `press` is not resolved here. It needs no element, so send it directly.
 
+## Files
+
+| File | Holds |
+| --- | --- |
+| `scripts/jev/policy.mjs` | The operations, how a screen is described, and when to stop. No application is touched here. |
+| `scripts/jev/desktop.mjs` | The only code that speaks to agent-desktop. |
+| `scripts/jev/run.mjs` | The loop and its command line. |
+| `scripts/jev/act.mjs` | The single-step resolver. |
+
 ## Checks
 
 ```sh
 node scripts/jev/act.test.mjs
+node scripts/jev/run.test.mjs
 ```
