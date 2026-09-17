@@ -7,6 +7,9 @@ import {
   buildRequest,
   criterion,
   fingerprint,
+  needsRiskCheck,
+  riskRequest,
+  route,
   shouldStop,
   textSupply,
   validateChoice,
@@ -80,18 +83,13 @@ const space = actionSpace(screen());
   const request = buildRequest("save the file", { app: "TextEdit", window: "Untitled" }, space, []);
   assert.deepEqual(
     Object.keys(request.questions).sort(),
-    [
-      "check_target",
-      "click_target",
-      "destructive",
-      "operation",
-      "scroll_target",
-      "type_text_target",
-      "uncheck_target",
-    ],
+    ["check_target", "click_target", "operation", "scroll_target", "type_text_target", "uncheck_target"],
     "one target head per offered operation, asked in the same request as the operation",
   );
-  assert.equal(request.questions.destructive.type, "noul", "how hard the step is to undo is asked in that same request");
+  assert.ok(
+    !("destructive" in request.questions),
+    "risk is not asked beside the operation, where it would rate a step nobody picked",
+  );
   for (const terminal of ["WAIT", "DONE", "BLOCKED"]) {
     assert.ok(terminal in request.questions.operation.criteria);
     assert.ok(!(`${terminal.toLowerCase()}_target` in request.questions), "a terminal operation has no target head");
@@ -187,6 +185,24 @@ const space = actionSpace(screen());
   );
   const withheld = actionSpace([{ ...node, ref_id: "@s:e1", available_actions: ["SetValue"] }], { values: false });
   assert.doesNotMatch(withheld.elements.join(" "), /4111/);
+}
+
+{
+  assert.equal(needsRiskCheck(0.95), false, "past the risky bar a step clears either threshold");
+  assert.equal(needsRiskCheck(0.5), false, "under the ordinary bar it clears neither");
+  assert.equal(needsRiskCheck(0.7), true, "only inside the band can the answer change anything");
+  assert.equal(needsRiskCheck(0.89), true);
+
+  const node = { role: "button", name: "Delete", ref_id: "@s:e1" };
+  const ask = riskRequest("tidy up", { app: "Finder", window: "Downloads" }, "CLICK", node);
+  assert.deepEqual(Object.keys(ask.questions), ["destructive"]);
+  assert.equal(ask.state.step.operation, "CLICK");
+  assert.match(ask.state.step.element, /Delete/, "the rating names the element that was actually chosen");
+
+  const safe = route({ target: "1", targetConfidence: 0.8, present: null, destructive: 0.1 });
+  assert.equal(safe.decision, "act");
+  const risky = route({ target: "1", targetConfidence: 0.8, present: null, destructive: 0.9 });
+  assert.equal(risky.decision, "confirm", "the same confidence is not enough once a step is hard to undo");
 }
 
 console.log("ok");

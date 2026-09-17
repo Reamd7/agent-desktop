@@ -17,6 +17,8 @@ import {
   buildRequest,
   criterion,
   fingerprint,
+  needsRiskCheck,
+  riskRequest,
   route,
   shouldStop,
   textSupply,
@@ -96,11 +98,22 @@ export const run = async function* (
         );
         node = space.targets[state.operation][head.choice];
         confidence = head.confidence;
+        let destructive = null;
+        if (needsRiskCheck(confidence)) {
+          const rated = await post(
+            API,
+            process.env.TYPESAFE_API_KEY,
+            riskRequest(goal, screen, state.operation, node, { values }),
+          );
+          state.calls += 1;
+          const answer = rated.answers?.destructive?.noul;
+          destructive = typeof answer === "number" ? answer : 1;
+        }
         const settled = route({
           target: head.choice,
           targetConfidence: confidence,
           present: null,
-          destructive: answers.destructive?.noul ?? null,
+          destructive,
         });
         if (settled.decision !== "act") {
           yield {

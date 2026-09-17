@@ -141,12 +141,6 @@ export const buildRequest = (goal, screen, space, history, { values = true } = {
             : ""),
       },
     },
-    destructive: {
-      type: "noul",
-      instructions:
-        "Would the operation you are about to choose be hard or impossible to undo on this screen: deleting, " +
-        "overwriting existing content, sending, purchasing, quitting without saving, or confirming a warning?",
-    },
   };
   for (const [operation, candidates] of Object.entries(space.targets)) {
     questions[`${operation.toLowerCase()}_target`] = {
@@ -203,7 +197,9 @@ export const fingerprint = (nodes) =>
  * Confidence is the second axis: the answer says what, confidence says whether
  * to act. The bar rises with how hard the action is to undo.
  */
-export const route = (a, { floor = 0.55, act = 0.7, risky = 0.9 } = {}) => {
+export const BARS = { floor: 0.55, act: 0.7, risky: 0.9 };
+
+export const route = (a, { floor = BARS.floor, act = BARS.act, risky = BARS.risky } = {}) => {
   if (a.target === NO_MATCH) return { decision: "abstain", why: "nothing on screen matches the intent" };
   if (a.present !== null && a.present < 0.3) {
     return { decision: "abstain", why: `the element is probably not on this screen (present ${a.present.toFixed(2)})` };
@@ -223,6 +219,33 @@ export const route = (a, { floor = 0.55, act = 0.7, risky = 0.9 } = {}) => {
   }
   return { decision: "act", why: null };
 };
+
+/**
+ * How hard a step is to undo only changes the outcome inside one band. Above
+ * the risky bar a step clears either threshold, and below the ordinary one it
+ * clears neither, so the question is worth asking about exactly the operation
+ * and element that were chosen, and only when the answer can still decide
+ * anything. Asking it alongside the operation would rate a step nobody picked.
+ */
+export const needsRiskCheck = (confidence) => confidence >= BARS.act && confidence < BARS.risky;
+
+export const riskRequest = (goal, screen, operation, node, { values = true } = {}) => ({
+  model: process.env.TYPESAFE_MODEL ?? "jev-latest",
+  state: {
+    goal,
+    app: screen.app,
+    window: screen.window,
+    step: { operation, element: criterion(node, "the target", { values }) },
+  },
+  questions: {
+    destructive: {
+      type: "noul",
+      instructions:
+        "The step named in `step` is about to run. Would it be hard or impossible to undo: deleting, " +
+        "overwriting existing content, sending, purchasing, quitting without saving, or confirming a warning?",
+    },
+  },
+});
 
 export const shouldStop = (state) => {
   if (state.operation === "DONE") return "done";
