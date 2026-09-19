@@ -26,9 +26,11 @@ const STALLED_TURNS = 3;
 export const typesafeApi = () =>
   process.env.TYPESAFE_BASE_URL ?? "https://api.typesafe.ai/v1/systemone";
 
-/** OpenRouter scopes model ids ("typesafe/jev-1.13"); the native API accepts bare aliases. */
+/** OpenRouter resolves bare aliases ("jev-latest") and "~typesafe/…" aliases, but
+ * "typesafe/jev-latest" (scoped, unregistered) answers 400 — so scope bare names
+ * through the tilde form, which is registered. */
 export const resolveModel = (model = process.env.TYPESAFE_MODEL ?? "jev-latest", api = typesafeApi()) =>
-  !model.includes("/") && api.includes("openrouter.ai") ? `typesafe/${model}` : model;
+  !model.includes("/") && api.includes("openrouter.ai") ? `~typesafe/${model}` : model;
 
 /**
  * Each operation names the one capability a target must advertise. The element

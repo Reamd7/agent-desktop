@@ -193,13 +193,12 @@ TYPESAFE_API_KEY=sk-or-... \
 node scripts/jev/run.mjs --app Finder "open the Applications folder"
 ```
 
-`TYPESAFE_MODEL` must be a pinned, scoped id on OpenRouter:
-`typesafe/jev-1.13` works, while the rolling `jev-latest` alias is not
-registered there (verified live: a bare alias gains the `typesafe/` scope
-automatically, but `typesafe/jev-latest` still answers
-`Model typesafe/jev-latest does not exist`). The wire contract is otherwise
-the same, so nothing else changes. OpenRouter's Decisions endpoint is alpha
-and may change shape.
+`TYPESAFE_MODEL` may stay at its `jev-latest` default — bare names are scoped
+through OpenRouter's registered `~typesafe/…` alias — or pin a routed id such
+as `typesafe/jev-1.13`. One live-checked trap: the scoped-but-unregistered
+`typesafe/jev-latest` answers `400 Model does not exist`. The wire contract is
+otherwise the same, so nothing else changes. OpenRouter's Decisions endpoint
+is alpha and may change shape.
 
 ## Known limits
 
