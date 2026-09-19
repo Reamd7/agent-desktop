@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { collect, describe, label, offerable, overlayRole } from "./screen.mjs";
-import { NO_MATCH, typesafeApi, route } from "./policy.mjs";
+import { NO_MATCH, resolveModel, typesafeApi, route } from "./policy.mjs";
 
 export { collect, describe, label, offerable, overlayRole, route };
 
@@ -70,7 +70,7 @@ export const buildRequest = (intent, surface, candidates, rich = false) => ({
     surface: surface.overlay ?? "window",
     element_count: candidates.length,
   },
-  model: "jev-latest",
+  model: resolveModel(),
   questions: {
     target: {
       type: "choice",

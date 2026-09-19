@@ -212,6 +212,8 @@ const space = actionSpace(screen());
   const native = "https://api.typesafe.ai/v1/systemone";
   const router = "https://openrouter.ai/api/alpha/decisions";
   assert.equal(resolveModel(undefined, native), "jev-latest", "the bare alias stays bare on the native API");
+  // Scoping only adds the typesafe/ namespace; OpenRouter additionally requires a
+  // pinned id there (typesafe/jev-1.13) — the rolling alias is not registered.
   assert.equal(
     resolveModel(undefined, router),
     "typesafe/jev-latest",

@@ -183,18 +183,23 @@ A screen with more than 254 elements says so in `notes`; use `--root @ref`.
 
 The decision endpoint is `TYPESAFE_BASE_URL`, defaulting to TypeSafe's native
 `https://api.typesafe.ai/v1/systemone`. Point it at OpenRouter's Decisions
-router to reuse an OpenRouter key instead of a TypeSafe one:
+router to reuse an OpenRouter key instead of a TypeSafe one (live-tested
+against `typesafe/jev-1.13`):
 
 ```sh
 TYPESAFE_BASE_URL=https://openrouter.ai/api/alpha/decisions \
+TYPESAFE_MODEL=typesafe/jev-1.13 \
 TYPESAFE_API_KEY=sk-or-... \
 node scripts/jev/run.mjs --app Finder "open the Applications folder"
 ```
 
-A bare `TYPESAFE_MODEL` alias (`jev-latest`, `jev-1.13`) is scoped to
-`typesafe/…` automatically on OpenRouter; explicit ids are sent as they are.
-The wire contract is the same, so nothing else changes. OpenRouter's Decisions
-endpoint is alpha and may change shape.
+`TYPESAFE_MODEL` must be a pinned, scoped id on OpenRouter:
+`typesafe/jev-1.13` works, while the rolling `jev-latest` alias is not
+registered there (verified live: a bare alias gains the `typesafe/` scope
+automatically, but `typesafe/jev-latest` still answers
+`Model typesafe/jev-latest does not exist`). The wire contract is otherwise
+the same, so nothing else changes. OpenRouter's Decisions endpoint is alpha
+and may change shape.
 
 ## Known limits
 
