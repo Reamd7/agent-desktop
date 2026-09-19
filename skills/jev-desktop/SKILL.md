@@ -58,8 +58,9 @@ does the value go through the clipboard and a paste. The clipboard is put back
 when the run ends. One key press per character is never used: it drops
 characters and loses capitals.
 
-**What leaves the machine.** Every turn posts a description of the screen to
-`api.typesafe.ai`: each element's role, its accessible name or description, up
+**What leaves the machine.** Every turn posts a description of the screen to the
+decision endpoint (TypeSafe's `api.typesafe.ai` by default, or whatever
+`TYPESAFE_BASE_URL` points at): each element's role, its accessible name or description, up
 to sixty characters of the value it holds, its state, the window title, and the
 recent actions. That is enough to send the contents of a private document or a
 filled form. Secure text fields are already withheld by agent-desktop and never
@@ -177,6 +178,23 @@ speculative ones cost tokens and no latency.
 A Choice accepts 255 options, so up to 254 elements go in one pass. When the
 first pass lands under 0.70 the top five are re-asked with richer descriptions.
 A screen with more than 254 elements says so in `notes`; use `--root @ref`.
+
+## Deciding through OpenRouter
+
+The decision endpoint is `TYPESAFE_BASE_URL`, defaulting to TypeSafe's native
+`https://api.typesafe.ai/v1/systemone`. Point it at OpenRouter's Decisions
+router to reuse an OpenRouter key instead of a TypeSafe one:
+
+```sh
+TYPESAFE_BASE_URL=https://openrouter.ai/api/alpha/decisions \
+TYPESAFE_API_KEY=sk-or-... \
+node scripts/jev/run.mjs --app Finder "open the Applications folder"
+```
+
+A bare `TYPESAFE_MODEL` alias (`jev-latest`, `jev-1.13`) is scoped to
+`typesafe/…` automatically on OpenRouter; explicit ids are sent as they are.
+The wire contract is the same, so nothing else changes. OpenRouter's Decisions
+endpoint is alpha and may change shape.
 
 ## Known limits
 
